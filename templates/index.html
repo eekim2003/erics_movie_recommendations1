@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Recommendations</title>
+</head>
+<body>
+    <h1>Movie Recommendations</h1>
+    <form method="post">
+        <input type="text" name="query" placeholder="Enter a letter or word">
+        <button type="submit">Search</button>
+    </form>
+    {% if recommendations %}
+        <h2>Recommendations:</h2>
+        <ul>
+            {% for movie in recommendations %}
+                <li>{{ movie.title }} ({{ movie.genre }})</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No recommendations found for your query.</p>
+    {% endif %}
+</body>
+</html>
