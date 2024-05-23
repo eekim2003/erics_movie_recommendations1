@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -44,9 +44,6 @@ def _re_transform() -> nodes.Module:
     )
 
 
-register_module_extender(AstroidManager(), "re", _re_transform)
-
-
 CLASS_GETITEM_TEMPLATE = """
 @classmethod
 def __class_getitem__(cls, item):
@@ -84,6 +81,8 @@ def infer_pattern_match(node: nodes.Call, ctx: context.InferenceContext | None =
         lineno=node.lineno,
         col_offset=node.col_offset,
         parent=node.parent,
+        end_lineno=node.end_lineno,
+        end_col_offset=node.end_col_offset,
     )
     if PY39_PLUS:
         func_to_add = _extract_single_node(CLASS_GETITEM_TEMPLATE)
@@ -91,6 +90,8 @@ def infer_pattern_match(node: nodes.Call, ctx: context.InferenceContext | None =
     return iter([class_def])
 
 
-AstroidManager().register_transform(
-    nodes.Call, inference_tip(infer_pattern_match), _looks_like_pattern_or_match
-)
+def register(manager: AstroidManager) -> None:
+    register_module_extender(manager, "re", _re_transform)
+    manager.register_transform(
+        nodes.Call, inference_tip(infer_pattern_match), _looks_like_pattern_or_match
+    )

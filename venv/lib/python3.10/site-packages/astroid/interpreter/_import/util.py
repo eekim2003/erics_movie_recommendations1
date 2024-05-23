@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from importlib._bootstrap_external import _NamespacePath
 from importlib.util import _find_spec_from_path  # type: ignore[attr-defined]
 
 from astroid.const import IS_PYPY
+
+if sys.version_info >= (3, 11):
+    from importlib.machinery import NamespaceLoader
+else:
+    from importlib._bootstrap_external import _NamespaceLoader as NamespaceLoader
 
 
 @lru_cache(maxsize=4096)
@@ -53,7 +58,7 @@ def is_namespace(modname: str) -> bool:
                 # See: https://foss.heptapod.net/pypy/pypy/-/issues/3736
                 # Check first fragment of modname, e.g. "astroid", not "astroid.interpreter"
                 # because of cffi's behavior
-                # See: https://github.com/PyCQA/astroid/issues/1776
+                # See: https://github.com/pylint-dev/astroid/issues/1776
                 mod = sys.modules[processed_components[0]]
                 return (
                     mod.__spec__ is None
@@ -78,12 +83,8 @@ def is_namespace(modname: str) -> bool:
 
             # Repair last_submodule_search_locations
             if last_submodule_search_locations:
-                # TODO: py38: remove except
-                try:
-                    # pylint: disable=unsubscriptable-object
-                    last_item = last_submodule_search_locations[-1]
-                except TypeError:
-                    last_item = last_submodule_search_locations._recalculate()[-1]
+                # pylint: disable=unsubscriptable-object
+                last_item = last_submodule_search_locations[-1]
                 # e.g. for failure example above, add 'a/b' and keep going
                 # so that find_spec('a.b.c', path=['a', 'a/b']) succeeds
                 assumed_location = pathlib.Path(last_item) / component
@@ -105,4 +106,7 @@ def is_namespace(modname: str) -> bool:
         found_spec is not None
         and found_spec.submodule_search_locations is not None
         and found_spec.origin is None
+        and (
+            found_spec.loader is None or isinstance(found_spec.loader, NamespaceLoader)
+        )
     )

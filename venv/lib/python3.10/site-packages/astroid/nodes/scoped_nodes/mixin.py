@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """This module contains mixin classes for scoped nodes."""
 
@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar, overload
 
+from astroid.exceptions import ParentMissingError
 from astroid.filter_statements import _filter_stmts
-from astroid.nodes import node_classes, scoped_nodes
+from astroid.nodes import _base_nodes, scoped_nodes
 from astroid.nodes.scoped_nodes.utils import builtin_lookup
-from astroid.typing import SuccessfulInferenceResult
+from astroid.typing import InferenceResult, SuccessfulInferenceResult
 
 if TYPE_CHECKING:
     from astroid import nodes
@@ -19,15 +20,14 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 
 
-class LocalsDictNodeNG(node_classes.LookupMixIn):
+class LocalsDictNodeNG(_base_nodes.LookupMixIn):
     """this class provides locals handling common to Module, FunctionDef
     and ClassDef nodes, including a dict like interface for direct access
     to locals information
     """
 
     # attributes below are set by the builder module or by raw factories
-
-    locals: dict[str, list[SuccessfulInferenceResult]] = {}
+    locals: dict[str, list[InferenceResult]]
     """A map of the name of a local variable to the node defining the local."""
 
     def qname(self) -> str:
@@ -38,10 +38,13 @@ class LocalsDictNodeNG(node_classes.LookupMixIn):
         :returns: The qualified name.
         :rtype: str
         """
-        # pylint: disable=no-member; github.com/pycqa/astroid/issues/278
+        # pylint: disable=no-member; github.com/pylint-dev/astroid/issues/278
         if self.parent is None:
             return self.name
-        return f"{self.parent.frame(future=True).qname()}.{self.name}"
+        try:
+            return f"{self.parent.frame().qname()}.{self.name}"
+        except ParentMissingError:
+            return self.name
 
     def scope(self: _T) -> _T:
         """The first parent node defining a new scope.
@@ -51,12 +54,13 @@ class LocalsDictNodeNG(node_classes.LookupMixIn):
         """
         return self
 
-    def scope_lookup(self, node, name: str, offset: int = 0):
+    def scope_lookup(
+        self, node: _base_nodes.LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[nodes.NodeNG]]:
         """Lookup where the given variable is assigned.
 
         :param node: The node to look for assignments up to.
             Any assignments after the given node are ignored.
-        :type node: NodeNG
 
         :param name: The name of the variable to find assignments for.
 
@@ -65,11 +69,12 @@ class LocalsDictNodeNG(node_classes.LookupMixIn):
         :returns: This scope node and the list of assignments associated to the
             given name according to the scope where it has been found (locals,
             globals or builtin).
-        :rtype: tuple(str, list(NodeNG))
         """
         raise NotImplementedError
 
-    def _scope_lookup(self, node, name, offset=0):
+    def _scope_lookup(
+        self, node: _base_nodes.LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[nodes.NodeNG]]:
         """XXX method for interfacing the scope lookup"""
         try:
             stmts = _filter_stmts(node, self.locals[name], self, offset)
@@ -115,12 +120,10 @@ class LocalsDictNodeNG(node_classes.LookupMixIn):
     @overload
     def add_local_node(
         self, child_node: nodes.ClassDef, name: str | None = ...
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
-    def add_local_node(self, child_node: nodes.NodeNG, name: str) -> None:
-        ...
+    def add_local_node(self, child_node: nodes.NodeNG, name: str) -> None: ...
 
     def add_local_node(self, child_node: nodes.NodeNG, name: str | None = None) -> None:
         """Append a child that should alter the locals of this scope node.

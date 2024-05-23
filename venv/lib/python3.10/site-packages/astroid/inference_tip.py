@@ -1,21 +1,31 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Transform utilities (filters and decorator)."""
 
 from __future__ import annotations
 
-import typing
-from collections.abc import Iterator
+from collections import OrderedDict
+from collections.abc import Generator
+from typing import Any, TypeVar
 
-import wrapt
-
+from astroid.context import InferenceContext
 from astroid.exceptions import InferenceOverwriteError, UseInferenceDefault
 from astroid.nodes import NodeNG
-from astroid.typing import InferenceResult, InferFn
+from astroid.typing import (
+    InferenceResult,
+    InferFn,
+    TransformFn,
+)
 
-_cache: dict[tuple[InferFn, NodeNG], list[InferenceResult] | None] = {}
+_cache: OrderedDict[
+    tuple[InferFn[Any], NodeNG, InferenceContext | None], list[InferenceResult]
+] = OrderedDict()
+
+_CURRENTLY_INFERRING: set[tuple[InferFn[Any], NodeNG]] = set()
+
+_NodesT = TypeVar("_NodesT", bound=NodeNG)
 
 
 def clear_inference_tip_cache() -> None:
@@ -23,26 +33,60 @@ def clear_inference_tip_cache() -> None:
     _cache.clear()
 
 
-@wrapt.decorator
-def _inference_tip_cached(
-    func: InferFn, instance: None, args: typing.Any, kwargs: typing.Any
-) -> Iterator[InferenceResult]:
+def _inference_tip_cached(func: InferFn[_NodesT]) -> InferFn[_NodesT]:
     """Cache decorator used for inference tips."""
-    node = args[0]
-    try:
-        result = _cache[func, node]
-        # If through recursion we end up trying to infer the same
-        # func + node we raise here.
-        if result is None:
-            raise UseInferenceDefault()
-    except KeyError:
-        _cache[func, node] = None
-        result = _cache[func, node] = list(func(*args, **kwargs))
-        assert result
-    return iter(result)
+
+    def inner(
+        node: _NodesT,
+        context: InferenceContext | None = None,
+        **kwargs: Any,
+    ) -> Generator[InferenceResult, None, None]:
+        partial_cache_key = (func, node)
+        if partial_cache_key in _CURRENTLY_INFERRING:
+            # If through recursion we end up trying to infer the same
+            # func + node we raise here.
+            _CURRENTLY_INFERRING.remove(partial_cache_key)
+            raise UseInferenceDefault
+        if context is not None and context.is_empty():
+            # Fresh, empty contexts will defeat the cache.
+            context = None
+        try:
+            yield from _cache[func, node, context]
+            return
+        except KeyError:
+            # Recursion guard with a partial cache key.
+            # Using the full key causes a recursion error on PyPy.
+            # It's a pragmatic compromise to avoid so much recursive inference
+            # with slightly different contexts while still passing the simple
+            # test cases included with this commit.
+            _CURRENTLY_INFERRING.add(partial_cache_key)
+            try:
+                # May raise UseInferenceDefault
+                result = _cache[func, node, context] = list(
+                    func(node, context, **kwargs)
+                )
+            except Exception as e:
+                # Suppress the KeyError from the cache miss.
+                raise e from None
+            finally:
+                # Remove recursion guard.
+                try:
+                    _CURRENTLY_INFERRING.remove(partial_cache_key)
+                except KeyError:
+                    pass  # Recursion may beat us to the punch.
+
+                if len(_cache) > 64:
+                    _cache.popitem(last=False)
+
+        # https://github.com/pylint-dev/pylint/issues/8686
+        yield from result  # pylint: disable=used-before-assignment
+
+    return inner
 
 
-def inference_tip(infer_function: InferFn, raise_on_overwrite: bool = False) -> InferFn:
+def inference_tip(
+    infer_function: InferFn[_NodesT], raise_on_overwrite: bool = False
+) -> TransformFn[_NodesT]:
     """Given an instance specific inference function, return a function to be
     given to AstroidManager().register_transform to set this inference function.
 
@@ -64,7 +108,9 @@ def inference_tip(infer_function: InferFn, raise_on_overwrite: bool = False) -> 
         excess overwrites.
     """
 
-    def transform(node: NodeNG, infer_function: InferFn = infer_function) -> NodeNG:
+    def transform(
+        node: _NodesT, infer_function: InferFn[_NodesT] = infer_function
+    ) -> _NodesT:
         if (
             raise_on_overwrite
             and node._explicit_inference is not None
@@ -78,7 +124,6 @@ def inference_tip(infer_function: InferFn, raise_on_overwrite: bool = False) -> 
                     node=node,
                 )
             )
-        # pylint: disable=no-value-for-parameter
         node._explicit_inference = _inference_tip_cached(infer_function)
         return node
 

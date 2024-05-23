@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for the UUID module."""
 from astroid.manager import AstroidManager
@@ -13,6 +13,7 @@ def _patch_uuid_class(node: ClassDef) -> None:
     node.locals["int"] = [Const(0, parent=node)]
 
 
-AstroidManager().register_transform(
-    ClassDef, _patch_uuid_class, lambda node: node.qname() == "uuid.UUID"
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        ClassDef, _patch_uuid_class, lambda node: node.qname() == "uuid.UUID"
+    )

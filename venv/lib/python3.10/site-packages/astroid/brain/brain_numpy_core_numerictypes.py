@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 # TODO(hippo91) : correct the methods signature.
 
@@ -258,6 +258,7 @@ def numpy_core_numerictypes_transform():
     )
 
 
-register_module_extender(
-    AstroidManager(), "numpy.core.numerictypes", numpy_core_numerictypes_transform
-)
+def register(manager: AstroidManager) -> None:
+    register_module_extender(
+        manager, "numpy.core.numerictypes", numpy_core_numerictypes_transform
+    )

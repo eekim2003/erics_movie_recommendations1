@@ -1,12 +1,12 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for the ssl library."""
 
 from astroid import parse
 from astroid.brain.helpers import register_module_extender
-from astroid.const import PY38_PLUS, PY310_PLUS
+from astroid.const import PY310_PLUS
 from astroid.manager import AstroidManager
 
 
@@ -41,9 +41,7 @@ def _options_enum() -> str:
         OP_SINGLE_ECDH_USE = 10
         OP_NO_COMPRESSION = 11
         OP_NO_TICKET = 12
-        OP_NO_RENEGOTIATION = 13"""
-    if PY38_PLUS:
-        enum += """
+        OP_NO_RENEGOTIATION = 13
         OP_ENABLE_MIDDLEBOX_COMPAT = 14"""
     return enum
 
@@ -157,4 +155,5 @@ def ssl_transform():
     )
 
 
-register_module_extender(AstroidManager(), "ssl", ssl_transform)
+def register(manager: AstroidManager) -> None:
+    register_module_extender(manager, "ssl", ssl_transform)

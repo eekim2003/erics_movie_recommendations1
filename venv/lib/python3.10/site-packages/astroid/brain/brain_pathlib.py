@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -44,8 +44,9 @@ def infer_parents_subscript(
     raise UseInferenceDefault
 
 
-AstroidManager().register_transform(
-    nodes.Subscript,
-    inference_tip(infer_parents_subscript),
-    _looks_like_parents_subscript,
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        nodes.Subscript,
+        inference_tip(infer_parents_subscript),
+        _looks_like_parents_subscript,
+    )

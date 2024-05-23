@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for the Python standard library."""
 
@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import functools
 import keyword
-import sys
 from collections.abc import Iterator
 from textwrap import dedent
+from typing import Final
 
 import astroid
 from astroid import arguments, bases, inference_tip, nodes, util
@@ -20,25 +20,10 @@ from astroid.exceptions import (
     AstroidTypeError,
     AstroidValueError,
     InferenceError,
-    MroError,
     UseInferenceDefault,
 )
 from astroid.manager import AstroidManager
 
-if sys.version_info >= (3, 8):
-    from typing import Final
-else:
-    from typing_extensions import Final
-
-
-ENUM_BASE_NAMES = {
-    "Enum",
-    "IntEnum",
-    "enum.Enum",
-    "enum.IntEnum",
-    "IntFlag",
-    "enum.IntFlag",
-}
 ENUM_QNAME: Final[str] = "enum.Enum"
 TYPING_NAMEDTUPLE_QUALIFIED: Final = {
     "typing.NamedTuple",
@@ -155,10 +140,17 @@ def infer_func_form(
     # we know it is a namedtuple anyway.
     name = name or "Uninferable"
     # we want to return a Class node instance with proper attributes set
-    class_node = nodes.ClassDef(name)
+    class_node = nodes.ClassDef(
+        name,
+        lineno=node.lineno,
+        col_offset=node.col_offset,
+        end_lineno=node.end_lineno,
+        end_col_offset=node.end_col_offset,
+        parent=nodes.Unknown(),
+    )
     # A typical ClassDef automatically adds its name to the parent scope,
     # but doing so causes problems, so defer setting parent until after init
-    # see: https://github.com/PyCQA/pylint/issues/5982
+    # see: https://github.com/pylint-dev/pylint/issues/5982
     class_node.parent = node.parent
     class_node.postinit(
         # set base class=tuple
@@ -202,7 +194,16 @@ def infer_named_tuple(
     node: nodes.Call, context: InferenceContext | None = None
 ) -> Iterator[nodes.ClassDef]:
     """Specific inference function for namedtuple Call node."""
-    tuple_base_name: list[nodes.NodeNG] = [nodes.Name(name="tuple", parent=node.root())]
+    tuple_base_name: list[nodes.NodeNG] = [
+        nodes.Name(
+            name="tuple",
+            parent=node.root(),
+            lineno=0,
+            col_offset=0,
+            end_lineno=None,
+            end_col_offset=None,
+        )
+    ]
     class_node, name, attributes = infer_func_form(
         node, tuple_base_name, context=context
     )
@@ -213,7 +214,9 @@ def infer_named_tuple(
     except StopIteration as e:
         raise InferenceError(node=node) from e
     try:
-        rename = next(call_site.infer_argument(func, "rename", context)).bool_value()
+        rename = next(
+            call_site.infer_argument(func, "rename", context or InferenceContext())
+        ).bool_value()
     except (InferenceError, StopIteration):
         rename = False
 
@@ -284,7 +287,7 @@ def _check_namedtuple_attributes(typename, attributes, rename=False):
 
     # The following snippet is derived from the CPython Lib/collections/__init__.py sources
     # <snippet>
-    for name in (typename,) + attributes:
+    for name in (typename, *attributes):
         if not isinstance(name, str):
             raise AstroidTypeError("Type names and field names must be strings")
         if not name.isidentifier():
@@ -391,10 +394,13 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
         dunder_members = {}
         target_names = set()
         for local, values in node.locals.items():
-            if any(not isinstance(value, nodes.AssignName) for value in values):
+            if (
+                any(not isinstance(value, nodes.AssignName) for value in values)
+                or local == "_ignore_"
+            ):
                 continue
 
-            stmt = values[0].statement(future=True)
+            stmt = values[0].statement()
             if isinstance(stmt, nodes.Assign):
                 if isinstance(stmt.targets[0], nodes.Tuple):
                     targets = stmt.targets[0].itered()
@@ -428,7 +434,13 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
                     def value(self):
                         return {return_value}
                     @property
+                    def _value_(self):
+                        return {return_value}
+                    @property
                     def name(self):
+                        return "{name}"
+                    @property
+                    def _name_(self):
                         return "{name}"
                 """.format(
                         name=target.name,
@@ -450,16 +462,42 @@ def infer_enum_class(node: nodes.ClassDef) -> nodes.ClassDef:
                 for method in node.mymethods():
                     fake.locals[method.name] = [method]
                 new_targets.append(fake.instantiate_class())
+                if stmt.value is None:
+                    continue
                 dunder_members[local] = fake
             node.locals[local] = new_targets
 
         # The undocumented `_value2member_map_` member:
-        node.locals["_value2member_map_"] = [nodes.Dict(parent=node)]
+        node.locals["_value2member_map_"] = [
+            nodes.Dict(
+                parent=node,
+                lineno=node.lineno,
+                col_offset=node.col_offset,
+                end_lineno=node.end_lineno,
+                end_col_offset=node.end_col_offset,
+            )
+        ]
 
-        members = nodes.Dict(parent=node)
+        members = nodes.Dict(
+            parent=node,
+            lineno=node.lineno,
+            col_offset=node.col_offset,
+            end_lineno=node.end_lineno,
+            end_col_offset=node.end_col_offset,
+        )
         members.postinit(
             [
-                (nodes.Const(k, parent=members), nodes.Name(v.name, parent=members))
+                (
+                    nodes.Const(k, parent=members),
+                    nodes.Name(
+                        v.name,
+                        parent=members,
+                        lineno=v.lineno,
+                        col_offset=v.col_offset,
+                        end_lineno=v.end_lineno,
+                        end_col_offset=v.end_col_offset,
+                    ),
+                )
                 for k, v in dunder_members.items()
             ]
         )
@@ -606,34 +644,30 @@ def _get_namedtuple_fields(node: nodes.Call) -> str:
 
 def _is_enum_subclass(cls: astroid.ClassDef) -> bool:
     """Return whether cls is a subclass of an Enum."""
-    try:
-        return any(
-            klass.name in ENUM_BASE_NAMES
-            and getattr(klass.root(), "name", None) == "enum"
-            for klass in cls.mro()
-        )
-    except MroError:
-        return False
+    return cls.is_subtype_of("enum.Enum")
 
 
-AstroidManager().register_transform(
-    nodes.Call, inference_tip(infer_named_tuple), _looks_like_namedtuple
-)
-AstroidManager().register_transform(
-    nodes.Call, inference_tip(infer_enum), _looks_like_enum
-)
-AstroidManager().register_transform(
-    nodes.ClassDef, infer_enum_class, predicate=_is_enum_subclass
-)
-AstroidManager().register_transform(
-    nodes.ClassDef, inference_tip(infer_typing_namedtuple_class), _has_namedtuple_base
-)
-AstroidManager().register_transform(
-    nodes.FunctionDef,
-    inference_tip(infer_typing_namedtuple_function),
-    lambda node: node.name == "NamedTuple"
-    and getattr(node.root(), "name", None) == "typing",
-)
-AstroidManager().register_transform(
-    nodes.Call, inference_tip(infer_typing_namedtuple), _looks_like_typing_namedtuple
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        nodes.Call, inference_tip(infer_named_tuple), _looks_like_namedtuple
+    )
+    manager.register_transform(nodes.Call, inference_tip(infer_enum), _looks_like_enum)
+    manager.register_transform(
+        nodes.ClassDef, infer_enum_class, predicate=_is_enum_subclass
+    )
+    manager.register_transform(
+        nodes.ClassDef,
+        inference_tip(infer_typing_namedtuple_class),
+        _has_namedtuple_base,
+    )
+    manager.register_transform(
+        nodes.FunctionDef,
+        inference_tip(infer_typing_namedtuple_function),
+        lambda node: node.name == "NamedTuple"
+        and getattr(node.root(), "name", None) == "typing",
+    )
+    manager.register_transform(
+        nodes.Call,
+        inference_tip(infer_typing_namedtuple),
+        _looks_like_typing_namedtuple,
+    )

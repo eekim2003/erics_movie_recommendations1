@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Contains logic for retrieving special methods.
 
@@ -12,10 +12,17 @@ http://lucumr.pocoo.org/2014/8/16/the-python-i-would-like-to-see/)
 As such, the lookup for the special methods is actually simpler than
 the dot attribute access.
 """
+from __future__ import annotations
+
 import itertools
+from typing import TYPE_CHECKING
 
 import astroid
 from astroid.exceptions import AttributeInferenceError
+
+if TYPE_CHECKING:
+    from astroid import nodes
+    from astroid.context import InferenceContext
 
 
 def _lookup_in_mro(node, name) -> list:
@@ -31,7 +38,9 @@ def _lookup_in_mro(node, name) -> list:
     return values
 
 
-def lookup(node, name) -> list:
+def lookup(
+    node: nodes.NodeNG, name: str, context: InferenceContext | None = None
+) -> list:
     """Lookup the given special method name in the given *node*.
 
     If the special method was found, then a list of attributes
@@ -45,13 +54,15 @@ def lookup(node, name) -> list:
     if isinstance(node, astroid.Instance):
         return _lookup_in_mro(node, name)
     if isinstance(node, astroid.ClassDef):
-        return _class_lookup(node, name)
+        return _class_lookup(node, name, context=context)
 
     raise AttributeInferenceError(attribute=name, target=node)
 
 
-def _class_lookup(node, name) -> list:
-    metaclass = node.metaclass()
+def _class_lookup(
+    node: nodes.ClassDef, name: str, context: InferenceContext | None = None
+) -> list:
+    metaclass = node.metaclass(context=context)
     if metaclass is None:
         raise AttributeInferenceError(attribute=name, target=node)
 

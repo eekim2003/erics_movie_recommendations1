@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for understanding ``boto3.ServiceRequest()``."""
 
@@ -26,6 +26,7 @@ def _looks_like_boto3_service_request(node) -> bool:
     return node.qname() == BOTO_SERVICE_FACTORY_QUALIFIED_NAME
 
 
-AstroidManager().register_transform(
-    ClassDef, service_request_transform, _looks_like_boto3_service_request
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        ClassDef, service_request_transform, _looks_like_boto3_service_request
+    )

@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Classes representing different types of constraints on inference values."""
 from __future__ import annotations
@@ -8,15 +8,18 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
-from astroid import bases, nodes, util
+from astroid import nodes, util
 from astroid.typing import InferenceResult
 
 if sys.version_info >= (3, 11):
     from typing import Self
 else:
     from typing_extensions import Self
+
+if TYPE_CHECKING:
+    from astroid import bases
 
 _NameNodes = Union[nodes.AssignAttr, nodes.Attribute, nodes.AssignName, nodes.Name]
 
@@ -33,7 +36,7 @@ class Constraint(ABC):
     @classmethod
     @abstractmethod
     def match(
-        cls: type[Self], node: _NameNodes, expr: nodes.NodeNG, negate: bool = False
+        cls, node: _NameNodes, expr: nodes.NodeNG, negate: bool = False
     ) -> Self | None:
         """Return a new constraint for node matched from expr, if expr matches
         the constraint pattern.
@@ -53,7 +56,7 @@ class NoneConstraint(Constraint):
 
     @classmethod
     def match(
-        cls: type[Self], node: _NameNodes, expr: nodes.NodeNG, negate: bool = False
+        cls, node: _NameNodes, expr: nodes.NodeNG, negate: bool = False
     ) -> Self | None:
         """Return a new constraint for node matched from expr, if expr matches
         the constraint pattern.

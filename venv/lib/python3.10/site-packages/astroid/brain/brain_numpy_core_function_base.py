@@ -1,12 +1,15 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for numpy.core.function_base module."""
 
 import functools
 
-from astroid.brain.brain_numpy_utils import infer_numpy_member, looks_like_numpy_member
+from astroid.brain.brain_numpy_utils import (
+    attribute_looks_like_numpy_member,
+    infer_numpy_member,
+)
 from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 from astroid.nodes.node_classes import Attribute
@@ -20,10 +23,12 @@ METHODS_TO_BE_INFERRED = {
             return numpy.ndarray([0, 0])""",
 }
 
-for func_name, func_src in METHODS_TO_BE_INFERRED.items():
-    inference_function = functools.partial(infer_numpy_member, func_src)
-    AstroidManager().register_transform(
-        Attribute,
-        inference_tip(inference_function),
-        functools.partial(looks_like_numpy_member, func_name),
-    )
+
+def register(manager: AstroidManager) -> None:
+    for func_name, func_src in METHODS_TO_BE_INFERRED.items():
+        inference_function = functools.partial(infer_numpy_member, func_src)
+        manager.register_transform(
+            Attribute,
+            inference_tip(inference_function),
+            functools.partial(attribute_looks_like_numpy_member, func_name),
+        )

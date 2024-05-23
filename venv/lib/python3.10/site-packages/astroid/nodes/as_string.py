@@ -1,17 +1,19 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """This module renders Astroid nodes as string"""
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from astroid import nodes
 
 if TYPE_CHECKING:
+    from astroid import objects
     from astroid.nodes import Const
     from astroid.nodes.node_classes import (
         Match,
@@ -178,6 +180,7 @@ class AsStringVisitor:
         args += [n.accept(self) for n in node.keywords]
         args_str = f"({', '.join(args)})" if args else ""
         docs = self._docs_dedent(node.doc_node)
+        # TODO: handle type_params
         return "\n\n{}class {}{}:{}\n{}\n".format(
             decorate, node.name, args_str, docs, self._stmt_list(node.body)
         )
@@ -293,12 +296,15 @@ class AsStringVisitor:
             # to get proper escapes, e.g. \n, \\, \"
             # But strip the quotes off the ends
             # (they will always be one character: ' or ")
-            repr(value.value)[1:-1]
-            # Literal braces must be doubled to escape them
-            .replace("{", "{{").replace("}", "}}")
-            # Each value in values is either a string literal (Const)
-            # or a FormattedValue
-            if type(value).__name__ == "Const" else value.accept(self)
+            (
+                repr(value.value)[1:-1]
+                # Literal braces must be doubled to escape them
+                .replace("{", "{{").replace("}", "}}")
+                # Each value in values is either a string literal (Const)
+                # or a FormattedValue
+                if type(value).__name__ == "Const"
+                else value.accept(self)
+            )
             for value in node.values
         )
 
@@ -322,7 +328,7 @@ class AsStringVisitor:
             result += ":" + node.format_spec.accept(self)[2:-1]
         return "{%s}" % result
 
-    def handle_functiondef(self, node, keyword) -> str:
+    def handle_functiondef(self, node: nodes.FunctionDef, keyword: str) -> str:
         """return a (possibly async) function definition node as string"""
         decorate = node.decorators.accept(self) if node.decorators else ""
         docs = self._docs_dedent(node.doc_node)
@@ -330,6 +336,7 @@ class AsStringVisitor:
         if node.returns:
             return_annotation = " -> " + node.returns.as_string()
             trailer = return_annotation + ":"
+        # TODO: handle type_params
         def_format = "\n%s%s %s(%s)%s%s\n%s"
         return def_format % (
             decorate,
@@ -341,11 +348,11 @@ class AsStringVisitor:
             self._stmt_list(node.body),
         )
 
-    def visit_functiondef(self, node) -> str:
+    def visit_functiondef(self, node: nodes.FunctionDef) -> str:
         """return an astroid.FunctionDef node as string"""
         return self.handle_functiondef(node, "def")
 
-    def visit_asyncfunctiondef(self, node) -> str:
+    def visit_asyncfunctiondef(self, node: nodes.AsyncFunctionDef) -> str:
         """return an astroid.AsyncFunction node as string"""
         return self.handle_functiondef(node, "async def")
 
@@ -357,7 +364,15 @@ class AsStringVisitor:
 
     def visit_attribute(self, node) -> str:
         """return an astroid.Getattr node as string"""
-        left = self._precedence_parens(node, node.expr)
+        try:
+            left = self._precedence_parens(node, node.expr)
+        except RecursionError:
+            warnings.warn(
+                "Recursion limit exhausted; defaulting to adding parentheses.",
+                UserWarning,
+                stacklevel=2,
+            )
+            left = f"({node.expr.accept(self)})"
         if left.isdigit():
             left = f"({left})"
         return f"{left}.{node.attrname}"
@@ -431,9 +446,17 @@ class AsStringVisitor:
         """return an astroid.Nonlocal node as string"""
         return f"nonlocal {', '.join(node.names)}"
 
+    def visit_paramspec(self, node: nodes.ParamSpec) -> str:
+        """return an astroid.ParamSpec node as string"""
+        return node.name.accept(self)
+
     def visit_pass(self, node) -> str:
         """return an astroid.Pass node as string"""
         return "pass"
+
+    def visit_partialfunction(self, node: objects.PartialFunction) -> str:
+        """Return an objects.PartialFunction as string."""
+        return self.visit_functiondef(node)
 
     def visit_raise(self, node) -> str:
         """return an astroid.Raise node as string"""
@@ -485,20 +508,16 @@ class AsStringVisitor:
             idxstr = idxstr[1:-1]
         return f"{self._precedence_parens(node, node.value)}[{idxstr}]"
 
-    def visit_tryexcept(self, node) -> str:
-        """return an astroid.TryExcept node as string"""
+    def visit_try(self, node) -> str:
+        """return an astroid.Try node as string"""
         trys = [f"try:\n{self._stmt_list(node.body)}"]
         for handler in node.handlers:
             trys.append(handler.accept(self))
         if node.orelse:
             trys.append(f"else:\n{self._stmt_list(node.orelse)}")
+        if node.finalbody:
+            trys.append(f"finally:\n{self._stmt_list(node.finalbody)}")
         return "\n".join(trys)
-
-    def visit_tryfinally(self, node) -> str:
-        """return an astroid.TryFinally node as string"""
-        return "try:\n{}\nfinally:\n{}".format(
-            self._stmt_list(node.body), self._stmt_list(node.finalbody)
-        )
 
     def visit_trystar(self, node) -> str:
         """return an astroid.TryStar node as string"""
@@ -516,6 +535,18 @@ class AsStringVisitor:
         if len(node.elts) == 1:
             return f"({node.elts[0].accept(self)}, )"
         return f"({', '.join(child.accept(self) for child in node.elts)})"
+
+    def visit_typealias(self, node: nodes.TypeAlias) -> str:
+        """return an astroid.TypeAlias node as string"""
+        return node.name.accept(self) if node.name else "_"
+
+    def visit_typevar(self, node: nodes.TypeVar) -> str:
+        """return an astroid.TypeVar node as string"""
+        return node.name.accept(self) if node.name else "_"
+
+    def visit_typevartuple(self, node: nodes.TypeVarTuple) -> str:
+        """return an astroid.TypeVarTuple node as string"""
+        return "*" + node.name.accept(self) if node.name else ""
 
     def visit_unaryop(self, node) -> str:
         """return an astroid.UnaryOp node as string"""

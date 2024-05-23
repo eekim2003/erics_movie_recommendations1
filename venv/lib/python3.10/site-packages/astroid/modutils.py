@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Python modules manipulation utility functions.
 
@@ -44,15 +44,17 @@ logger = logging.getLogger(__name__)
 
 
 if sys.platform.startswith("win"):
-    PY_SOURCE_EXTS = ("py", "pyw")
+    PY_SOURCE_EXTS = ("py", "pyw", "pyi")
+    PY_SOURCE_EXTS_STUBS_FIRST = ("pyi", "pyw", "py")
     PY_COMPILED_EXTS = ("dll", "pyd")
 else:
-    PY_SOURCE_EXTS = ("py",)
+    PY_SOURCE_EXTS = ("py", "pyi")
+    PY_SOURCE_EXTS_STUBS_FIRST = ("pyi", "py")
     PY_COMPILED_EXTS = ("so",)
 
 
 # TODO: Adding `platstdlib` is a fix for a workaround in virtualenv. At some point we should
-# revisit whether this is still necessary. See https://github.com/PyCQA/astroid/pull/1323.
+# revisit whether this is still necessary. See https://github.com/pylint-dev/astroid/pull/1323.
 STD_LIB_DIRS = {sysconfig.get_path("stdlib"), sysconfig.get_path("platstdlib")}
 
 if os.name == "nt":
@@ -80,7 +82,7 @@ if IS_PYPY and sys.version_info < (3, 8):
     STD_LIB_DIRS.add(str(Path(sysconfig.get_path("stdlib")).parent / "lib-python/3"))
 
     # TODO: This is a fix for a workaround in virtualenv. At some point we should revisit
-    # whether this is still necessary. See https://github.com/PyCQA/astroid/pull/1324.
+    # whether this is still necessary. See https://github.com/pylint-dev/astroid/pull/1324.
     STD_LIB_DIRS.add(str(Path(sysconfig.get_path("platstdlib")).parent / "lib_pypy"))
     STD_LIB_DIRS.add(
         str(Path(sysconfig.get_path("platstdlib")).parent / "lib-python/3")
@@ -108,7 +110,7 @@ if os.name == "posix":
         # standard library could be found. More details can be found
         # here http://bugs.python.org/issue1294959.
         # An easy reproducing case would be
-        # https://github.com/PyCQA/pylint/issues/712#issuecomment-163178753
+        # https://github.com/pylint-dev/pylint/issues/712#issuecomment-163178753
         STD_LIB_DIRS.add(_posix_path("lib64"))
 
 EXT_LIB_DIRS = {sysconfig.get_path("purelib"), sysconfig.get_path("platlib")}
@@ -155,7 +157,7 @@ def _handle_blacklist(
             filenames.remove(norecurs)
 
 
-@lru_cache()
+@lru_cache
 def _cache_normalize_path_(path: str) -> str:
     return _normalize_path(path)
 
@@ -273,9 +275,6 @@ def _get_relative_base_path(filename: str, path_to_check: str) -> list[str] | No
     real_filename = os.path.realpath(filename)
     if os.path.normcase(real_filename).startswith(path_to_check):
         importable_path = real_filename
-
-    # if "var" in path_to_check:
-    #     breakpoint()
 
     if importable_path:
         base_path = os.path.splitext(importable_path)[0]
@@ -477,7 +476,7 @@ def get_module_files(
             continue
         _handle_blacklist(blacklist, dirnames, filenames)
         # check for __init__.py
-        if not list_all and "__init__.py" not in filenames:
+        if not list_all and {"__init__.py", "__init__.pyi"}.isdisjoint(filenames):
             dirnames[:] = ()
             continue
         for filename in filenames:
@@ -487,11 +486,12 @@ def get_module_files(
     return files
 
 
-def get_source_file(filename: str, include_no_ext: bool = False) -> str:
+def get_source_file(
+    filename: str, include_no_ext: bool = False, prefer_stubs: bool = False
+) -> str:
     """Given a python module's file name return the matching source file
-    name (the filename will be returned identically if it's already an.
-
-    absolute path to a python source file...)
+    name (the filename will be returned identically if it's already an
+    absolute path to a python source file).
 
     :param filename: python module's file name
 
@@ -501,7 +501,9 @@ def get_source_file(filename: str, include_no_ext: bool = False) -> str:
     """
     filename = os.path.abspath(_path_from_filename(filename))
     base, orig_ext = os.path.splitext(filename)
-    for ext in PY_SOURCE_EXTS:
+    if orig_ext == ".pyi" and os.path.exists(f"{base}{orig_ext}"):
+        return f"{base}{orig_ext}"
+    for ext in PY_SOURCE_EXTS_STUBS_FIRST if prefer_stubs else PY_SOURCE_EXTS:
         source_path = f"{base}.{ext}"
         if os.path.exists(source_path):
             return source_path
@@ -665,7 +667,7 @@ def _is_python_file(filename: str) -> bool:
 
     .pyc and .pyo are ignored
     """
-    return filename.endswith((".py", ".so", ".pyd", ".pyw"))
+    return filename.endswith((".py", ".pyi", ".so", ".pyd", ".pyw"))
 
 
 def _has_init(directory: str) -> str | None:
@@ -673,7 +675,7 @@ def _has_init(directory: str) -> str | None:
     else return None.
     """
     mod_or_pack = os.path.join(directory, "__init__")
-    for ext in PY_SOURCE_EXTS + ("pyc", "pyo"):
+    for ext in (*PY_SOURCE_EXTS, "pyc", "pyo"):
         if os.path.exists(mod_or_pack + "." + ext):
             return mod_or_pack + "." + ext
     return None

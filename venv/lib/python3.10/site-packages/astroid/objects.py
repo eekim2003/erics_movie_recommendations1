@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Inference objects are a way to represent composite AST nodes,
@@ -13,11 +13,11 @@ leads to an inferred FrozenSet:
 
 from __future__ import annotations
 
-import sys
-from collections.abc import Generator
-from typing import Any, TypeVar
+from collections.abc import Generator, Iterator
+from functools import cached_property
+from typing import Any, Literal, NoReturn, TypeVar
 
-from astroid import bases, decorators, util
+from astroid import bases, util
 from astroid.context import InferenceContext
 from astroid.exceptions import (
     AttributeInferenceError,
@@ -25,18 +25,10 @@ from astroid.exceptions import (
     MroError,
     SuperError,
 )
+from astroid.interpreter import objectmodel
 from astroid.manager import AstroidManager
 from astroid.nodes import node_classes, scoped_nodes
-
-objectmodel = util.lazy_import("interpreter.objectmodel")
-
-if sys.version_info >= (3, 8):
-    from functools import cached_property
-    from typing import Literal
-else:
-    from typing_extensions import Literal
-
-    from astroid.decorators import cachedproperty as cached_property
+from astroid.typing import InferenceResult, SuccessfulInferenceResult
 
 _T = TypeVar("_T")
 
@@ -69,16 +61,28 @@ class Super(node_classes.NodeNG):
     *scope* is the function where the super call is.
     """
 
-    # pylint: disable=unnecessary-lambda
-    special_attributes = util.lazy_descriptor(lambda: objectmodel.SuperModel())
+    special_attributes = objectmodel.SuperModel()
 
-    def __init__(self, mro_pointer, mro_type, self_class, scope):
+    def __init__(
+        self,
+        mro_pointer: SuccessfulInferenceResult,
+        mro_type: SuccessfulInferenceResult,
+        self_class: scoped_nodes.ClassDef,
+        scope: scoped_nodes.FunctionDef,
+        call: node_classes.Call,
+    ) -> None:
         self.type = mro_type
         self.mro_pointer = mro_pointer
         self._class_based = False
         self._self_class = self_class
         self._scope = scope
-        super().__init__()
+        super().__init__(
+            parent=scope,
+            lineno=scope.lineno,
+            col_offset=scope.col_offset,
+            end_lineno=scope.end_lineno,
+            end_col_offset=scope.end_col_offset,
+        )
 
     def _infer(self, context: InferenceContext | None = None, **kwargs: Any):
         yield self
@@ -140,7 +144,7 @@ class Super(node_classes.NodeNG):
 
     def igetattr(  # noqa: C901
         self, name: str, context: InferenceContext | None = None
-    ):
+    ) -> Iterator[InferenceResult]:
         """Retrieve the inferred values of the given attribute name."""
         # '__class__' is a special attribute that should be taken directly
         # from the special attributes dict
@@ -248,8 +252,7 @@ class DictInstance(bases.Instance):
     that methods such as .values or .items can be properly inferred.
     """
 
-    # pylint: disable=unnecessary-lambda
-    special_attributes = util.lazy_descriptor(lambda: objectmodel.DictModel())
+    special_attributes = objectmodel.DictModel()
 
 
 # Custom objects tailored for dictionaries, which are used to
@@ -273,14 +276,16 @@ class DictValues(bases.Proxy):
 class PartialFunction(scoped_nodes.FunctionDef):
     """A class representing partial function obtained via functools.partial."""
 
-    @decorators.deprecate_arguments(doc="Use the postinit arg 'doc_node' instead")
-    def __init__(
-        self, call, name=None, doc=None, lineno=None, col_offset=None, parent=None
-    ):
-        # TODO: Pass end_lineno and end_col_offset as well
-        super().__init__(name, lineno=lineno, col_offset=col_offset, parent=None)
-        # Assigned directly to prevent triggering the DeprecationWarning.
-        self._doc = doc
+    def __init__(self, call, name=None, lineno=None, col_offset=None, parent=None):
+        # TODO: Pass end_lineno, end_col_offset and parent as well
+        super().__init__(
+            name,
+            lineno=lineno,
+            col_offset=col_offset,
+            parent=node_classes.Unknown(),
+            end_col_offset=0,
+            end_lineno=0,
+        )
         # A typical FunctionDef automatically adds its name to the parent scope,
         # but a partial should not, so defer setting parent until after init
         self.parent = parent
@@ -298,8 +303,15 @@ class PartialFunction(scoped_nodes.FunctionDef):
 
         self.filled_positionals = len(self.filled_args)
 
-    def infer_call_result(self, caller=None, context: InferenceContext | None = None):
+    def infer_call_result(
+        self,
+        caller: SuccessfulInferenceResult | None,
+        context: InferenceContext | None = None,
+    ) -> Iterator[InferenceResult]:
         if context:
+            assert (
+                context.callcontext
+            ), "CallContext should be set before inferring call result"
             current_passed_keywords = {
                 keyword for (keyword, _) in context.callcontext.keywords
             }
@@ -324,23 +336,28 @@ node_classes.Dict.__bases__ = (node_classes.NodeNG, DictInstance)
 class Property(scoped_nodes.FunctionDef):
     """Class representing a Python property."""
 
-    @decorators.deprecate_arguments(doc="Use the postinit arg 'doc_node' instead")
-    def __init__(
-        self, function, name=None, doc=None, lineno=None, col_offset=None, parent=None
-    ):
+    def __init__(self, function, name=None, lineno=None, col_offset=None, parent=None):
         self.function = function
-        super().__init__(name, lineno=lineno, col_offset=col_offset, parent=parent)
-        # Assigned directly to prevent triggering the DeprecationWarning.
-        self._doc = doc
+        super().__init__(
+            name,
+            lineno=lineno,
+            col_offset=col_offset,
+            parent=parent,
+            end_col_offset=function.end_col_offset,
+            end_lineno=function.end_lineno,
+        )
 
-    # pylint: disable=unnecessary-lambda
-    special_attributes = util.lazy_descriptor(lambda: objectmodel.PropertyModel())
+    special_attributes = objectmodel.PropertyModel()
     type = "property"
 
     def pytype(self) -> Literal["builtins.property"]:
         return "builtins.property"
 
-    def infer_call_result(self, caller=None, context: InferenceContext | None = None):
+    def infer_call_result(
+        self,
+        caller: SuccessfulInferenceResult | None,
+        context: InferenceContext | None = None,
+    ) -> NoReturn:
         raise InferenceError("Properties are not callable")
 
     def _infer(

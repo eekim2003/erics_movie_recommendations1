@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -16,9 +16,16 @@ def infer_namespace(node, context: InferenceContext | None = None):
         # Cannot make sense of it.
         raise UseInferenceDefault()
 
-    class_node = nodes.ClassDef("Namespace")
+    class_node = nodes.ClassDef(
+        "Namespace",
+        lineno=node.lineno,
+        col_offset=node.col_offset,
+        parent=nodes.Unknown(),
+        end_lineno=node.end_lineno,
+        end_col_offset=node.end_col_offset,
+    )
     # Set parent manually until ClassDef constructor fixed:
-    # https://github.com/PyCQA/astroid/issues/1490
+    # https://github.com/pylint-dev/astroid/issues/1490
     class_node.parent = node.parent
     for attr in set(callsite.keyword_arguments):
         fake_node = nodes.EmptyNode()
@@ -39,6 +46,7 @@ def _looks_like_namespace(node) -> bool:
     return False
 
 
-AstroidManager().register_transform(
-    nodes.Call, inference_tip(infer_namespace), _looks_like_namespace
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        nodes.Call, inference_tip(infer_namespace), _looks_like_namespace
+    )

@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Astroid hooks for type support.
@@ -63,7 +63,8 @@ def infer_type_sub(node, context: InferenceContext | None = None):
     return node.infer(context=context)
 
 
-if PY39_PLUS:
-    AstroidManager().register_transform(
-        nodes.Name, inference_tip(infer_type_sub), _looks_like_type_subscript
-    )
+def register(manager: AstroidManager) -> None:
+    if PY39_PLUS:
+        manager.register_transform(
+            nodes.Name, inference_tip(infer_type_sub), _looks_like_type_subscript
+        )

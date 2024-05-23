@@ -1,35 +1,19 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 
 from __future__ import annotations
 
-import importlib
-import sys
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any, Final, Literal
 
-import lazy_object_proxy
+from astroid.exceptions import InferenceError
 
-if sys.version_info >= (3, 8):
-    from typing import Final, Literal
-else:
-    from typing_extensions import Final, Literal
-
-
-def lazy_descriptor(obj):
-    class DescriptorProxy(lazy_object_proxy.Proxy):
-        def __get__(self, instance, owner=None):
-            return self.__class__.__get__(self, instance)
-
-    return DescriptorProxy(obj)
-
-
-def lazy_import(module_name: str) -> lazy_object_proxy.Proxy:
-    return lazy_object_proxy.Proxy(
-        lambda: importlib.import_module("." + module_name, "astroid")
-    )
+if TYPE_CHECKING:
+    from astroid import bases, nodes
+    from astroid.context import InferenceContext
+    from astroid.typing import InferenceResult
 
 
 class UninferableBase:
@@ -85,7 +69,8 @@ class BadUnaryOperationMessage(BadOperationMessage):
 
     @property
     def _object_type_helper(self):
-        helpers = lazy_import("helpers")
+        from astroid import helpers  # pylint: disable=import-outside-toplevel
+
         return helpers.object_type
 
     def _object_type(self, obj):
@@ -136,19 +121,6 @@ def _instancecheck(cls, other) -> bool:
     return is_instance_of
 
 
-def proxy_alias(alias_name, node_type):
-    """Get a Proxy from the given name to the given node type."""
-    proxy = type(
-        alias_name,
-        (lazy_object_proxy.Proxy,),
-        {
-            "__class__": object.__dict__["__class__"],
-            "__instancecheck__": _instancecheck,
-        },
-    )
-    return proxy(lambda: node_type)
-
-
 def check_warnings_filter() -> bool:
     """Return True if any other than the default DeprecationWarning filter is enabled.
 
@@ -160,3 +132,28 @@ def check_warnings_filter() -> bool:
         and filter[3] != "__main__"
         for filter in warnings.filters
     )
+
+
+def safe_infer(
+    node: nodes.NodeNG | bases.Proxy | UninferableBase,
+    context: InferenceContext | None = None,
+) -> InferenceResult | None:
+    """Return the inferred value for the given node.
+
+    Return None if inference failed or if there is some ambiguity (more than
+    one node has been inferred).
+    """
+    if isinstance(node, UninferableBase):
+        return node
+    try:
+        inferit = node.infer(context=context)
+        value = next(inferit)
+    except (InferenceError, StopIteration):
+        return None
+    try:
+        next(inferit)
+        return None  # None if there is ambiguity on the inferred node
+    except InferenceError:
+        return None  # there is some kind of ambiguity
+    except StopIteration:
+        return value

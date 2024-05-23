@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """A few useful function/method decorators."""
 
@@ -13,11 +13,10 @@ import warnings
 from collections.abc import Callable, Generator
 from typing import TypeVar
 
-import wrapt
-
-from astroid import _cache, util
+from astroid import util
 from astroid.context import InferenceContext
 from astroid.exceptions import InferenceError
+from astroid.typing import InferenceResult
 
 if sys.version_info >= (3, 10):
     from typing import ParamSpec
@@ -26,68 +25,6 @@ else:
 
 _R = TypeVar("_R")
 _P = ParamSpec("_P")
-
-
-@wrapt.decorator
-def cached(func, instance, args, kwargs):
-    """Simple decorator to cache result of method calls without args."""
-    cache = getattr(instance, "__cache", None)
-    if cache is None:
-        instance.__cache = cache = {}
-        _cache.CACHE_MANAGER.add_dict_cache(cache)
-    try:
-        return cache[func]
-    except KeyError:
-        cache[func] = result = func(*args, **kwargs)
-        return result
-
-
-# TODO: Remove when support for 3.7 is dropped
-# TODO: astroid 3.0 -> move class behind sys.version_info < (3, 8) guard
-class cachedproperty:
-    """Provides a cached property equivalent to the stacking of
-    @cached and @property, but more efficient.
-
-    After first usage, the <property_name> becomes part of the object's
-    __dict__. Doing:
-
-      del obj.<property_name> empties the cache.
-
-    Idea taken from the pyramid_ framework and the mercurial_ project.
-
-    .. _pyramid: http://pypi.python.org/pypi/pyramid
-    .. _mercurial: http://pypi.python.org/pypi/Mercurial
-    """
-
-    __slots__ = ("wrapped",)
-
-    def __init__(self, wrapped):
-        if sys.version_info >= (3, 8):
-            warnings.warn(
-                "cachedproperty has been deprecated and will be removed in astroid 3.0 for Python 3.8+. "
-                "Use functools.cached_property instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        try:
-            wrapped.__name__
-        except AttributeError as exc:
-            raise TypeError(f"{wrapped} must have a __name__ attribute") from exc
-        self.wrapped = wrapped
-
-    @property
-    def __doc__(self):
-        doc = getattr(self.wrapped, "__doc__", None)
-        return "<wrapped by the cachedproperty decorator>%s" % (
-            "\n%s" % doc if doc else ""
-        )
-
-    def __get__(self, inst, objtype=None):
-        if inst is None:
-            return self
-        val = self.wrapped(inst)
-        setattr(inst, self.wrapped.__name__, val)
-        return val
 
 
 def path_wrapper(func):
@@ -122,39 +59,50 @@ def path_wrapper(func):
     return wrapped
 
 
-@wrapt.decorator
-def yes_if_nothing_inferred(func, instance, args, kwargs):
-    generator = func(*args, **kwargs)
+def yes_if_nothing_inferred(
+    func: Callable[_P, Generator[InferenceResult, None, None]]
+) -> Callable[_P, Generator[InferenceResult, None, None]]:
+    def inner(
+        *args: _P.args, **kwargs: _P.kwargs
+    ) -> Generator[InferenceResult, None, None]:
+        generator = func(*args, **kwargs)
 
-    try:
-        yield next(generator)
-    except StopIteration:
-        # generator is empty
-        yield util.Uninferable
-        return
+        try:
+            yield next(generator)
+        except StopIteration:
+            # generator is empty
+            yield util.Uninferable
+            return
 
-    yield from generator
+        yield from generator
+
+    return inner
 
 
-@wrapt.decorator
-def raise_if_nothing_inferred(func, instance, args, kwargs):
-    generator = func(*args, **kwargs)
-    try:
-        yield next(generator)
-    except StopIteration as error:
-        # generator is empty
-        if error.args:
-            # pylint: disable=not-a-mapping
-            raise InferenceError(**error.args[0]) from error
-        raise InferenceError(
-            "StopIteration raised without any error information."
-        ) from error
-    except RecursionError as error:
-        raise InferenceError(
-            f"RecursionError raised with limit {sys.getrecursionlimit()}."
-        ) from error
+def raise_if_nothing_inferred(
+    func: Callable[_P, Generator[InferenceResult, None, None]],
+) -> Callable[_P, Generator[InferenceResult, None, None]]:
+    def inner(
+        *args: _P.args, **kwargs: _P.kwargs
+    ) -> Generator[InferenceResult, None, None]:
+        generator = func(*args, **kwargs)
+        try:
+            yield next(generator)
+        except StopIteration as error:
+            # generator is empty
+            if error.args:
+                raise InferenceError(**error.args[0]) from error
+            raise InferenceError(
+                "StopIteration raised without any error information."
+            ) from error
+        except RecursionError as error:
+            raise InferenceError(
+                f"RecursionError raised with limit {sys.getrecursionlimit()}."
+            ) from error
 
-    yield from generator
+        yield from generator
+
+    return inner
 
 
 # Expensive decorators only used to emit Deprecation warnings.

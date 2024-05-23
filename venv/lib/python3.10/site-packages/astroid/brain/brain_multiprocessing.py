@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from astroid.bases import BoundMethod
 from astroid.brain.helpers import register_module_extender
@@ -99,9 +99,8 @@ def _multiprocessing_managers_transform():
     )
 
 
-register_module_extender(
-    AstroidManager(), "multiprocessing.managers", _multiprocessing_managers_transform
-)
-register_module_extender(
-    AstroidManager(), "multiprocessing", _multiprocessing_transform
-)
+def register(manager: AstroidManager) -> None:
+    register_module_extender(
+        manager, "multiprocessing.managers", _multiprocessing_managers_transform
+    )
+    register_module_extender(manager, "multiprocessing", _multiprocessing_transform)

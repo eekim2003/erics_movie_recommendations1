@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """_filter_stmts and helper functions.
 
@@ -10,13 +10,19 @@ It is not considered public.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from astroid import nodes
+from astroid.typing import SuccessfulInferenceResult
+
+if TYPE_CHECKING:
+    from astroid.nodes import _base_nodes
 
 
 def _get_filtered_node_statements(
     base_node: nodes.NodeNG, stmt_nodes: list[nodes.NodeNG]
-) -> list[tuple[nodes.NodeNG, nodes.Statement]]:
-    statements = [(node, node.statement(future=True)) for node in stmt_nodes]
+) -> list[tuple[nodes.NodeNG, _base_nodes.Statement]]:
+    statements = [(node, node.statement()) for node in stmt_nodes]
     # Next we check if we have ExceptHandlers that are parent
     # of the underlying variable, in which case the last one survives
     if len(statements) > 1 and all(
@@ -41,7 +47,12 @@ def _get_if_statement_ancestor(node: nodes.NodeNG) -> nodes.If | None:
     return None
 
 
-def _filter_stmts(base_node: nodes.NodeNG, stmts, frame, offset):
+def _filter_stmts(
+    base_node: _base_nodes.LookupMixIn,
+    stmts: list[SuccessfulInferenceResult],
+    frame: nodes.LocalsDictNodeNG,
+    offset: int,
+) -> list[nodes.NodeNG]:
     """Filter the given list of statements to remove ignorable statements.
 
     If base_node is not a frame itself and the name is found in the inner
@@ -49,16 +60,12 @@ def _filter_stmts(base_node: nodes.NodeNG, stmts, frame, offset):
     statements according to base_node's location.
 
     :param stmts: The statements to filter.
-    :type stmts: list(nodes.NodeNG)
 
     :param frame: The frame that all of the given statements belong to.
-    :type frame: nodes.NodeNG
 
     :param offset: The line offset to filter statements up to.
-    :type offset: int
 
     :returns: The filtered statements.
-    :rtype: list(nodes.NodeNG)
     """
     # if offset == -1, my actual frame is not the inner frame but its parent
     #
@@ -80,16 +87,12 @@ def _filter_stmts(base_node: nodes.NodeNG, stmts, frame, offset):
         #
         # def test(b=1):
         #     ...
-        if (
-            base_node.parent
-            and base_node.statement(future=True) is myframe
-            and myframe.parent
-        ):
+        if base_node.parent and base_node.statement() is myframe and myframe.parent:
             myframe = myframe.parent.frame()
 
-    mystmt: nodes.Statement | None = None
+    mystmt: _base_nodes.Statement | None = None
     if base_node.parent:
-        mystmt = base_node.statement(future=True)
+        mystmt = base_node.statement()
 
     # line filtering if we are in the same frame
     #
@@ -102,7 +105,7 @@ def _filter_stmts(base_node: nodes.NodeNG, stmts, frame, offset):
         # disabling lineno filtering
         mylineno = 0
 
-    _stmts = []
+    _stmts: list[nodes.NodeNG] = []
     _stmt_parents = []
     statements = _get_filtered_node_statements(base_node, stmts)
     for node, stmt in statements:
@@ -145,16 +148,10 @@ def _filter_stmts(base_node: nodes.NodeNG, stmts, frame, offset):
                     optional_assign = False
                     _stmts.append(node)
                     _stmt_parents.append(stmt.parent)
-                # If the if statement is first-level and not within an orelse block
-                # we know that it will be evaluated
-                elif not if_parent.is_orelse:
+                # Else we assume that it will be evaluated
+                else:
                     _stmts = [node]
                     _stmt_parents = [stmt.parent]
-                # Else we do not known enough about the control flow to be 100% certain
-                # and we append to possible statements
-                else:
-                    _stmts.append(node)
-                    _stmt_parents.append(stmt.parent)
             else:
                 _stmts = [node]
                 _stmt_parents = [stmt.parent]

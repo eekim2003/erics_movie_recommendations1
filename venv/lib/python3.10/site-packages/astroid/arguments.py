@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from astroid import nodes
 from astroid.bases import Instance
 from astroid.context import CallContext, InferenceContext
 from astroid.exceptions import InferenceError, NoDefault
-from astroid.util import Uninferable, UninferableBase
+from astroid.typing import InferenceResult
+from astroid.util import Uninferable, UninferableBase, safe_infer
 
 
 class CallSite:
@@ -84,34 +85,25 @@ class CallSite:
         """
         return len(self.keyword_arguments) != len(self._unpacked_kwargs)
 
-    def _unpack_keywords(self, keywords, context: InferenceContext | None = None):
-        values = {}
+    def _unpack_keywords(
+        self,
+        keywords: list[tuple[str | None, nodes.NodeNG]],
+        context: InferenceContext | None = None,
+    ):
+        values: dict[str | None, InferenceResult] = {}
         context = context or InferenceContext()
         context.extra_context = self.argument_context_map
         for name, value in keywords:
             if name is None:
                 # Then it's an unpacking operation (**)
-                try:
-                    inferred = next(value.infer(context=context))
-                except InferenceError:
-                    values[name] = Uninferable
-                    continue
-                except StopIteration:
-                    continue
-
+                inferred = safe_infer(value, context=context)
                 if not isinstance(inferred, nodes.Dict):
                     # Not something we can work with.
                     values[name] = Uninferable
                     continue
 
                 for dict_key, dict_value in inferred.items:
-                    try:
-                        dict_key = next(dict_key.infer(context=context))
-                    except InferenceError:
-                        values[name] = Uninferable
-                        continue
-                    except StopIteration:
-                        continue
+                    dict_key = safe_infer(dict_key, context=context)
                     if not isinstance(dict_key, nodes.Const):
                         values[name] = Uninferable
                         continue
@@ -134,14 +126,7 @@ class CallSite:
         context.extra_context = self.argument_context_map
         for arg in args:
             if isinstance(arg, nodes.Starred):
-                try:
-                    inferred = next(arg.value.infer(context=context))
-                except InferenceError:
-                    values.append(Uninferable)
-                    continue
-                except StopIteration:
-                    continue
-
+                inferred = safe_infer(arg.value, context=context)
                 if isinstance(inferred, UninferableBase):
                     values.append(Uninferable)
                     continue
@@ -153,14 +138,19 @@ class CallSite:
                 values.append(arg)
         return values
 
-    def infer_argument(self, funcnode, name, context):  # noqa: C901
-        """Infer a function argument value according to the call context.
+    def infer_argument(
+        self, funcnode: InferenceResult, name: str, context: InferenceContext
+    ):  # noqa: C901
+        """Infer a function argument value according to the call context."""
+        if not isinstance(funcnode, (nodes.FunctionDef, nodes.Lambda)):
+            raise InferenceError(
+                f"Can not infer function argument value for non-function node {funcnode!r}.",
+                call_site=self,
+                func=funcnode,
+                arg=name,
+                context=context,
+            )
 
-        Arguments:
-            funcnode: The function being called.
-            name: The name of the argument whose value is being inferred.
-            context: Inference context object
-        """
         if name in self.duplicated_keywords:
             raise InferenceError(
                 "The arguments passed to {func!r} have duplicate keywords.",
@@ -191,7 +181,13 @@ class CallSite:
 
         positional = self.positional_arguments[: len(funcnode.args.args)]
         vararg = self.positional_arguments[len(funcnode.args.args) :]
-        argindex = funcnode.args.find_argname(name)[0]
+
+        # preserving previous behavior, when vararg and kwarg were not included in find_argname results
+        if name in [funcnode.args.vararg, funcnode.args.kwarg]:
+            argindex = None
+        else:
+            argindex = funcnode.args.find_argname(name)[0]
+
         kwonlyargs = {arg.name for arg in funcnode.args.kwonlyargs}
         kwargs = {
             key: value
@@ -210,7 +206,7 @@ class CallSite:
                     positional.append(arg)
 
         if argindex is not None:
-            boundnode = getattr(context, "boundnode", None)
+            boundnode = context.boundnode
             # 2. first argument of instance/class method
             if argindex == 0 and funcnode.type in {"method", "classmethod"}:
                 # context.boundnode is None when an instance method is called with
@@ -220,7 +216,7 @@ class CallSite:
                     return positional[0].infer(context=context)
                 if boundnode is None:
                     # XXX can do better ?
-                    boundnode = funcnode.parent.frame(future=True)
+                    boundnode = funcnode.parent.frame()
 
                 if isinstance(boundnode, nodes.ClassDef):
                     # Verify that we're accessing a method
@@ -228,7 +224,7 @@ class CallSite:
                     # `cls.metaclass_method`. In this case, the
                     # first argument is always the class.
                     method_scope = funcnode.parent.scope()
-                    if method_scope is boundnode.metaclass():
+                    if method_scope is boundnode.metaclass(context=context):
                         return iter((boundnode,))
 
                 if funcnode.type == "method":
@@ -267,6 +263,8 @@ class CallSite:
                 lineno=funcnode.args.lineno,
                 col_offset=funcnode.args.col_offset,
                 parent=funcnode.args,
+                end_lineno=funcnode.args.end_lineno,
+                end_col_offset=funcnode.args.end_col_offset,
             )
             kwarg.postinit(
                 [(nodes.const_factory(key), value) for key, value in kwargs.items()]

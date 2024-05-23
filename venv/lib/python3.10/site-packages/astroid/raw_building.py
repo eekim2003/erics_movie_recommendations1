@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """this module contains a set of functions to create astroid trees from scratch
 (build_* functions) or from living object (object_build_* functions)
@@ -39,7 +39,6 @@ _FunctionTypes = Union[
 
 # the keys of CONST_CLS eg python builtin types
 _CONSTANTS = tuple(node_classes.CONST_CLS)
-_BUILTINS = vars(builtins)
 TYPE_NONE = type(None)
 TYPE_NOTIMPLEMENTED = type(NotImplemented)
 TYPE_ELLIPSIS = type(...)
@@ -100,9 +99,26 @@ def build_class(
     name: str, basenames: Iterable[str] = (), doc: str | None = None
 ) -> nodes.ClassDef:
     """Create and initialize an astroid ClassDef node."""
-    node = nodes.ClassDef(name)
+    node = nodes.ClassDef(
+        name,
+        lineno=0,
+        col_offset=0,
+        end_lineno=0,
+        end_col_offset=0,
+        parent=nodes.Unknown(),
+    )
     node.postinit(
-        bases=[nodes.Name(name=base, parent=node) for base in basenames],
+        bases=[
+            nodes.Name(
+                name=base,
+                lineno=0,
+                col_offset=0,
+                parent=node,
+                end_lineno=None,
+                end_col_offset=None,
+            )
+            for base in basenames
+        ],
         body=[],
         decorators=None,
         doc_node=nodes.Const(value=doc) if doc else None,
@@ -121,46 +137,87 @@ def build_function(
 ) -> nodes.FunctionDef:
     """create and initialize an astroid FunctionDef node"""
     # first argument is now a list of decorators
-    func = nodes.FunctionDef(name)
-    argsnode = nodes.Arguments(parent=func)
+    func = nodes.FunctionDef(
+        name,
+        lineno=0,
+        col_offset=0,
+        parent=node_classes.Unknown(),
+        end_col_offset=0,
+        end_lineno=0,
+    )
+    argsnode = nodes.Arguments(parent=func, vararg=None, kwarg=None)
 
     # If args is None we don't have any information about the signature
     # (in contrast to when there are no arguments and args == []). We pass
     # this to the builder to indicate this.
     if args is not None:
-        arguments = [nodes.AssignName(name=arg, parent=argsnode) for arg in args]
+        # We set the lineno and col_offset to 0 because we don't have any
+        # information about the location of the function definition.
+        arguments = [
+            nodes.AssignName(
+                name=arg,
+                parent=argsnode,
+                lineno=0,
+                col_offset=0,
+                end_lineno=None,
+                end_col_offset=None,
+            )
+            for arg in args
+        ]
     else:
         arguments = None
 
-    default_nodes: list[nodes.NodeNG] | None = []
-    if defaults is not None:
+    default_nodes: list[nodes.NodeNG] | None
+    if defaults is None:
+        default_nodes = None
+    else:
+        default_nodes = []
         for default in defaults:
             default_node = nodes.const_factory(default)
             default_node.parent = argsnode
             default_nodes.append(default_node)
-    else:
-        default_nodes = None
 
-    kwonlydefault_nodes: list[nodes.NodeNG | None] | None = []
-    if kwonlydefaults is not None:
+    kwonlydefault_nodes: list[nodes.NodeNG | None] | None
+    if kwonlydefaults is None:
+        kwonlydefault_nodes = None
+    else:
+        kwonlydefault_nodes = []
         for kwonlydefault in kwonlydefaults:
             kwonlydefault_node = nodes.const_factory(kwonlydefault)
             kwonlydefault_node.parent = argsnode
             kwonlydefault_nodes.append(kwonlydefault_node)
-    else:
-        kwonlydefault_nodes = None
 
+    # We set the lineno and col_offset to 0 because we don't have any
+    # information about the location of the kwonly and posonlyargs.
     argsnode.postinit(
         args=arguments,
         defaults=default_nodes,
         kwonlyargs=[
-            nodes.AssignName(name=arg, parent=argsnode) for arg in kwonlyargs or ()
+            nodes.AssignName(
+                name=arg,
+                parent=argsnode,
+                lineno=0,
+                col_offset=0,
+                end_lineno=None,
+                end_col_offset=None,
+            )
+            for arg in kwonlyargs or ()
         ],
         kw_defaults=kwonlydefault_nodes,
         annotations=[],
         posonlyargs=[
-            nodes.AssignName(name=arg, parent=argsnode) for arg in posonlyargs or ()
+            nodes.AssignName(
+                name=arg,
+                parent=argsnode,
+                lineno=0,
+                col_offset=0,
+                end_lineno=None,
+                end_col_offset=None,
+            )
+            for arg in posonlyargs or ()
         ],
+        kwonlyargs_annotations=[],
+        posonlyargs_annotations=[],
     )
     func.postinit(
         args=argsnode,
@@ -354,7 +411,7 @@ def _build_from_function(
 def _safe_has_attribute(obj, member: str) -> bool:
     """Required because unexpected RunTimeError can be raised.
 
-    See https://github.com/PyCQA/astroid/issues/1958
+    See https://github.com/pylint-dev/astroid/issues/1958
     """
     try:
         return hasattr(obj, member)
@@ -368,6 +425,8 @@ class InspectBuilder:
     this is actually a really minimal representation, including only Module,
     FunctionDef and ClassDef nodes and some others as guessed.
     """
+
+    bootstrapped: bool = False
 
     def __init__(self, manager_instance: AstroidManager | None = None) -> None:
         self._manager = manager_instance or AstroidManager()
@@ -564,7 +623,14 @@ def _astroid_bootstrapping() -> None:
     # Set the builtin module as parent for some builtins.
     nodes.Const._proxied = property(_set_proxied)
 
-    _GeneratorType = nodes.ClassDef(types.GeneratorType.__name__)
+    _GeneratorType = nodes.ClassDef(
+        types.GeneratorType.__name__,
+        lineno=0,
+        col_offset=0,
+        end_lineno=0,
+        end_col_offset=0,
+        parent=nodes.Unknown(),
+    )
     _GeneratorType.parent = astroid_builtin
     generator_doc_node = (
         nodes.Const(value=types.GeneratorType.__doc__)
@@ -581,7 +647,14 @@ def _astroid_bootstrapping() -> None:
     builder.object_build(bases.Generator._proxied, types.GeneratorType)
 
     if hasattr(types, "AsyncGeneratorType"):
-        _AsyncGeneratorType = nodes.ClassDef(types.AsyncGeneratorType.__name__)
+        _AsyncGeneratorType = nodes.ClassDef(
+            types.AsyncGeneratorType.__name__,
+            lineno=0,
+            col_offset=0,
+            end_lineno=0,
+            end_col_offset=0,
+            parent=nodes.Unknown(),
+        )
         _AsyncGeneratorType.parent = astroid_builtin
         async_generator_doc_node = (
             nodes.Const(value=types.AsyncGeneratorType.__doc__)
@@ -598,7 +671,14 @@ def _astroid_bootstrapping() -> None:
         builder.object_build(bases.AsyncGenerator._proxied, types.AsyncGeneratorType)
 
     if hasattr(types, "UnionType"):
-        _UnionTypeType = nodes.ClassDef(types.UnionType.__name__)
+        _UnionTypeType = nodes.ClassDef(
+            types.UnionType.__name__,
+            lineno=0,
+            col_offset=0,
+            end_lineno=0,
+            end_col_offset=0,
+            parent=nodes.Unknown(),
+        )
         _UnionTypeType.parent = astroid_builtin
         union_type_doc_node = (
             nodes.Const(value=types.UnionType.__doc__)
@@ -628,7 +708,14 @@ def _astroid_bootstrapping() -> None:
     )
     for _type in builtin_types:
         if _type.__name__ not in astroid_builtin:
-            klass = nodes.ClassDef(_type.__name__)
+            klass = nodes.ClassDef(
+                _type.__name__,
+                lineno=0,
+                col_offset=0,
+                end_lineno=0,
+                end_col_offset=0,
+                parent=nodes.Unknown(),
+            )
             klass.parent = astroid_builtin
             klass.postinit(
                 bases=[],
@@ -639,5 +726,11 @@ def _astroid_bootstrapping() -> None:
             builder.object_build(klass, _type)
             astroid_builtin[_type.__name__] = klass
 
+    InspectBuilder.bootstrapped = True
 
-_astroid_bootstrapping()
+    # pylint: disable-next=import-outside-toplevel
+    from astroid.brain.brain_builtin_inference import on_bootstrap
+
+    # Instantiates an AstroidBuilder(), which is where
+    # InspectBuilder.bootstrapped is checked, so place after bootstrapped=True.
+    on_bootstrap()

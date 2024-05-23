@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 from __future__ import annotations
 
@@ -15,19 +15,15 @@ import sys
 import types
 import warnings
 import zipimport
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple, Protocol
 
 from astroid.const import PY310_PLUS
 from astroid.modutils import EXT_LIB_DIRS
 
 from . import util
-
-if sys.version_info >= (3, 8):
-    from typing import Literal, Protocol
-else:
-    from typing_extensions import Literal, Protocol
 
 
 # The MetaPathFinder protocol comes from typeshed, which says:
@@ -38,8 +34,7 @@ class _MetaPathFinder(Protocol):
         fullname: str,
         path: Sequence[str] | None,
         target: types.ModuleType | None = ...,
-    ) -> importlib.machinery.ModuleSpec | None:
-        ...  # pragma: no cover
+    ) -> importlib.machinery.ModuleSpec | None: ...  # pragma: no cover
 
 
 class ModuleType(enum.Enum):
@@ -166,9 +161,10 @@ class ImportlibFinder(Finder):
                 pass
             submodule_path = sys.path
 
+        suffixes = (".py", ".pyi", importlib.machinery.BYTECODE_SUFFIXES[0])
         for entry in submodule_path:
             package_directory = os.path.join(entry, modname)
-            for suffix in (".py", importlib.machinery.BYTECODE_SUFFIXES[0]):
+            for suffix in suffixes:
                 package_file_name = "__init__" + suffix
                 file_path = os.path.join(package_directory, package_file_name)
                 if os.path.isfile(file_path):
@@ -206,7 +202,7 @@ class ImportlibFinder(Finder):
             # virtualenv below 20.0 patches distutils in an unexpected way
             # so we just find the location of distutils that will be
             # imported to avoid spurious import-error messages
-            # https://github.com/PyCQA/pylint/issues/5645
+            # https://github.com/pylint-dev/pylint/issues/5645
             # A regression test to create this scenario exists in release-tests.yml
             # and can be triggered manually from GitHub Actions
             distutils_spec = importlib.util.find_spec("distutils")
@@ -233,7 +229,7 @@ class ExplicitNamespacePackageFinder(ImportlibFinder):
         submodule_path: Sequence[str] | None,
     ) -> ModuleSpec | None:
         if processed:
-            modname = ".".join(processed + [modname])
+            modname = ".".join([*processed, modname])
         if util.is_namespace(modname) and modname in sys.modules:
             submodule_path = sys.modules[modname].__path__
             return ModuleSpec(
@@ -398,7 +394,7 @@ def _find_spec_with_path(
             # "type" as their __class__.__name__. We check __name__ as well
             # to see if we can support the finder.
             try:
-                meta_finder_name = meta_finder.__name__
+                meta_finder_name = meta_finder.__name__  # type: ignore[attr-defined]
             except AttributeError:
                 continue
             if meta_finder_name not in _MetaPathFinderModuleTypes:
@@ -409,7 +405,7 @@ def _find_spec_with_path(
         # Meta path finders are supposed to have a find_spec method since
         # Python 3.4. However, some third-party finders do not implement it.
         # PEP302 does not refer to find_spec as well.
-        # See: https://github.com/PyCQA/astroid/pull/1752/
+        # See: https://github.com/pylint-dev/astroid/pull/1752/
         if not hasattr(meta_finder, "find_spec"):
             continue
 
@@ -429,7 +425,7 @@ def _find_spec_with_path(
     raise ImportError(f"No module named {'.'.join(module_parts)}")
 
 
-def find_spec(modpath: list[str], path: Sequence[str] | None = None) -> ModuleSpec:
+def find_spec(modpath: Iterable[str], path: Iterable[str] | None = None) -> ModuleSpec:
     """Find a spec for the given module.
 
     :type modpath: list or tuple
@@ -446,10 +442,15 @@ def find_spec(modpath: list[str], path: Sequence[str] | None = None) -> ModuleSp
     :return: A module spec, which describes how the module was
              found and where.
     """
+    return _find_spec(tuple(modpath), tuple(path) if path else None)
+
+
+@lru_cache(maxsize=1024)
+def _find_spec(module_path: tuple, path: tuple) -> ModuleSpec:
     _path = path or sys.path
 
     # Need a copy for not mutating the argument.
-    modpath = modpath[:]
+    modpath = list(module_path)
 
     submodule_path = None
     module_parts = modpath[:]
@@ -466,7 +467,8 @@ def find_spec(modpath: list[str], path: Sequence[str] | None = None) -> ModuleSp
                 submodule_path = finder.contribute_to_path(spec, processed)
             # If modname is a package from an editable install, update submodule_path
             # so that the next module in the path will be found inside of it using importlib.
-            elif finder.__name__ in _EditableFinderClasses:
+            # Existence of __name__ is guaranteed by _find_spec_with_path.
+            elif finder.__name__ in _EditableFinderClasses:  # type: ignore[attr-defined]
                 submodule_path = spec.submodule_search_locations
 
         if spec.type == ModuleType.PKG_DIRECTORY:

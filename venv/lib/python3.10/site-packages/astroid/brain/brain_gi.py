@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for the Python 2 GObject introspection bindings.
 
@@ -243,7 +243,8 @@ def _register_require_version(node):
     return node
 
 
-AstroidManager().register_failed_import_hook(_import_gi_module)
-AstroidManager().register_transform(
-    nodes.Call, _register_require_version, _looks_like_require_version
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_failed_import_hook(_import_gi_module)
+    manager.register_transform(
+        nodes.Call, _register_require_version, _looks_like_require_version
+    )

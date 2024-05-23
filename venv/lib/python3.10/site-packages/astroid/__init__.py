@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Python Abstract Syntax Tree New Generation.
 
@@ -16,7 +16,7 @@ compatible with python's _ast.
 Instance attributes are added by a
 builder object, which can either generate extended ast (let's call
 them astroid ;) by visiting an existent ast tree or by inspecting living
-object. Methods are added by monkey patching ast classes.
+object.
 
 Main modules are:
 
@@ -32,26 +32,21 @@ Main modules are:
 
 import functools
 import tokenize
-from importlib import import_module
 
 # isort: off
-# We have an isort: off on '__version__' because the packaging need to access
-# the version before the dependencies are installed (in particular 'wrapt'
-# that is imported in astroid.inference)
-from astroid.__pkginfo__ import __version__, version
+# We have an isort: off on 'astroid.nodes' because of a circular import.
 from astroid.nodes import node_classes, scoped_nodes
 
 # isort: on
 
-from astroid import inference, raw_building
-from astroid.astroid_manager import MANAGER
+from astroid import raw_building
+from astroid.__pkginfo__ import __version__, version
 from astroid.bases import BaseInstance, BoundMethod, Instance, UnboundMethod
 from astroid.brain.helpers import register_module_extender
 from astroid.builder import extract_node, parse
-from astroid.const import BRAIN_MODULES_DIRECTORY, PY310_PLUS, Context, Del, Load, Store
+from astroid.const import PY310_PLUS, Context
 from astroid.exceptions import (
     AstroidBuildingError,
-    AstroidBuildingException,
     AstroidError,
     AstroidImportError,
     AstroidIndexError,
@@ -59,7 +54,6 @@ from astroid.exceptions import (
     AstroidTypeError,
     AstroidValueError,
     AttributeInferenceError,
-    BinaryOperationError,
     DuplicateBasesError,
     InconsistentMroError,
     InferenceError,
@@ -68,14 +62,12 @@ from astroid.exceptions import (
     NameInferenceError,
     NoDefault,
     NotFoundError,
-    OperationError,
     ParentMissingError,
     ResolveError,
     StatementMissing,
     SuperArgumentTypeError,
     SuperError,
     TooManyLevelsError,
-    UnaryOperationError,
     UnresolvableName,
     UseInferenceDefault,
 )
@@ -88,7 +80,8 @@ from astroid.objects import ExceptionInstance
 # and we need astroid/scoped_nodes and astroid/node_classes to work. So
 # importing with a wildcard would clash with astroid/nodes/scoped_nodes
 # and astroid/nodes/node_classes.
-from astroid.nodes import (  # pylint: disable=redefined-builtin (Ellipsis)
+from astroid.astroid_manager import MANAGER
+from astroid.nodes import (
     CONST_CLS,
     AnnAssign,
     Arguments,
@@ -119,12 +112,10 @@ from astroid.nodes import (  # pylint: disable=redefined-builtin (Ellipsis)
     Dict,
     DictComp,
     DictUnpack,
-    Ellipsis,
     EmptyNode,
     EvaluatedObject,
     ExceptHandler,
     Expr,
-    ExtSlice,
     For,
     FormattedValue,
     FunctionDef,
@@ -134,7 +125,6 @@ from astroid.nodes import (  # pylint: disable=redefined-builtin (Ellipsis)
     IfExp,
     Import,
     ImportFrom,
-    Index,
     JoinedStr,
     Keyword,
     Lambda,
@@ -155,6 +145,7 @@ from astroid.nodes import (  # pylint: disable=redefined-builtin (Ellipsis)
     NamedExpr,
     NodeNG,
     Nonlocal,
+    ParamSpec,
     Pass,
     Raise,
     Return,
@@ -163,10 +154,12 @@ from astroid.nodes import (  # pylint: disable=redefined-builtin (Ellipsis)
     Slice,
     Starred,
     Subscript,
-    TryExcept,
-    TryFinally,
+    Try,
     TryStar,
     Tuple,
+    TypeAlias,
+    TypeVar,
+    TypeVarTuple,
     UnaryOp,
     Unknown,
     While,
@@ -190,9 +183,4 @@ if (
     and callable(getattr(tokenize, "_compile", None))
     and getattr(tokenize._compile, "__wrapped__", None) is None  # type: ignore[attr-defined]
 ):
-    tokenize._compile = functools.lru_cache()(tokenize._compile)  # type: ignore[attr-defined]
-
-# load brain plugins
-for module in BRAIN_MODULES_DIRECTORY.iterdir():
-    if module.suffix == ".py":
-        import_module(f"astroid.brain.{module.stem}")
+    tokenize._compile = functools.lru_cache(tokenize._compile)  # type: ignore[attr-defined]

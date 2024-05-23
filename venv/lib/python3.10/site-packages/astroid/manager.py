@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """astroid manager: avoid multiple astroid build of a same module when
 possible by providing a class responsible to get astroid representation
@@ -14,12 +14,9 @@ import os
 import types
 import zipimport
 from collections.abc import Callable, Iterator, Sequence
-from importlib.util import find_spec, module_from_spec
 from typing import Any, ClassVar
 
 from astroid import nodes
-from astroid._cache import CACHE_MANAGER
-from astroid.const import BRAIN_MODULES_DIRECTORY
 from astroid.context import InferenceContext, _invalidate_cache
 from astroid.exceptions import AstroidBuildingError, AstroidImportError
 from astroid.interpreter._import import spec, util
@@ -54,16 +51,18 @@ class AstroidManager:
     """
 
     name = "astroid loader"
-    brain: AstroidManagerBrain = {
+    brain: ClassVar[AstroidManagerBrain] = {
         "astroid_cache": {},
         "_mod_file_cache": {},
         "_failed_import_hooks": [],
         "always_load_extensions": False,
         "optimize_ast": False,
+        "max_inferable_values": 100,
         "extension_package_whitelist": set(),
+        "module_denylist": set(),
         "_transform": TransformVisitor(),
+        "prefer_stubs": False,
     }
-    max_inferable_values: ClassVar[int] = 100
 
     def __init__(self) -> None:
         # NOTE: cache entries are added by the [re]builder
@@ -73,7 +72,9 @@ class AstroidManager:
         self.extension_package_whitelist = AstroidManager.brain[
             "extension_package_whitelist"
         ]
+        self.module_denylist = AstroidManager.brain["module_denylist"]
         self._transform = AstroidManager.brain["_transform"]
+        self.prefer_stubs = AstroidManager.brain["prefer_stubs"]
 
     @property
     def always_load_extensions(self) -> bool:
@@ -92,6 +93,14 @@ class AstroidManager:
         AstroidManager.brain["optimize_ast"] = value
 
     @property
+    def max_inferable_values(self) -> int:
+        return AstroidManager.brain["max_inferable_values"]
+
+    @max_inferable_values.setter
+    def max_inferable_values(self, value: int) -> None:
+        AstroidManager.brain["max_inferable_values"] = value
+
+    @property
     def register_transform(self):
         # This and unregister_transform below are exported for convenience
         return self._transform.register_transform
@@ -103,6 +112,14 @@ class AstroidManager:
     @property
     def builtins_module(self) -> nodes.Module:
         return self.astroid_cache["builtins"]
+
+    @property
+    def prefer_stubs(self) -> bool:
+        return AstroidManager.brain["prefer_stubs"]
+
+    @prefer_stubs.setter
+    def prefer_stubs(self, value: bool) -> None:
+        AstroidManager.brain["prefer_stubs"] = value
 
     def visit_transforms(self, node: nodes.NodeNG) -> InferenceResult:
         """Visit the transforms and apply them to the given *node*."""
@@ -116,16 +133,26 @@ class AstroidManager:
         source: bool = False,
     ) -> nodes.Module:
         """Given a module name, return the astroid object."""
-        try:
-            filepath = get_source_file(filepath, include_no_ext=True)
-            source = True
-        except NoSourceFile:
-            pass
         if modname is None:
             try:
                 modname = ".".join(modpath_from_file(filepath))
             except ImportError:
                 modname = filepath
+        if (
+            modname in self.astroid_cache
+            and self.astroid_cache[modname].file == filepath
+        ):
+            return self.astroid_cache[modname]
+        # Call get_source_file() only after a cache miss,
+        # since it calls os.path.exists().
+        try:
+            filepath = get_source_file(
+                filepath, include_no_ext=True, prefer_stubs=self.prefer_stubs
+            )
+            source = True
+        except NoSourceFile:
+            pass
+        # Second attempt on the cache after get_source_file().
         if (
             modname in self.astroid_cache
             and self.astroid_cache[modname].file == filepath
@@ -187,6 +214,8 @@ class AstroidManager:
         # importing a module with the same name as the file that is importing
         # we want to fallback on the import system to make sure we get the correct
         # module.
+        if modname in self.module_denylist:
+            raise AstroidImportError(f"Skipping ignored module {modname!r}")
         if modname in self.astroid_cache and use_cache:
             return self.astroid_cache[modname]
         if modname == "__main__":
@@ -269,7 +298,6 @@ class AstroidManager:
             except ValueError:
                 continue
             try:
-                # pylint: disable-next=no-member
                 importer = zipimport.zipimporter(eggpath + ext)
                 zmodname = resource.replace(os.path.sep, ".")
                 if importer.is_package(resource):
@@ -293,7 +321,6 @@ class AstroidManager:
                     modname.split("."), context_file=contextfile
                 )
             except ImportError as e:
-                # pylint: disable-next=redefined-variable-type
                 value = AstroidImportError(
                     "Failed to import module {modname} with error:\n{error}.",
                     modname=modname,
@@ -390,8 +417,7 @@ class AstroidManager:
         # take care, on living object __module__ is regularly wrong :(
         modastroid = self.ast_from_module_name(modname)
         if klass is obj:
-            for inferred in modastroid.igetattr(name, context):
-                yield inferred
+            yield from modastroid.igetattr(name, context)
         else:
             for inferred in modastroid.igetattr(name, context):
                 yield inferred.instantiate_class()
@@ -426,9 +452,11 @@ class AstroidManager:
         """
         # import here because of cyclic imports
         # pylint: disable=import-outside-toplevel
+        from astroid.brain.helpers import register_all_brains
         from astroid.inference_tip import clear_inference_tip_cache
+        from astroid.interpreter._import.spec import _find_spec
         from astroid.interpreter.objectmodel import ObjectModel
-        from astroid.nodes.node_classes import LookupMixIn
+        from astroid.nodes._base_nodes import LookupMixIn
         from astroid.nodes.scoped_nodes import ClassDef
 
         clear_inference_tip_cache()
@@ -438,24 +466,17 @@ class AstroidManager:
         # NB: not a new TransformVisitor()
         AstroidManager.brain["_transform"].transforms = collections.defaultdict(list)
 
-        CACHE_MANAGER.clear_all_caches()
-
         for lru_cache in (
             LookupMixIn.lookup,
             _cache_normalize_path_,
             util.is_namespace,
             ObjectModel.attributes,
             ClassDef._metaclass_lookup_attribute,
+            _find_spec,
         ):
             lru_cache.cache_clear()  # type: ignore[attr-defined]
 
         self.bootstrap()
 
-        # Reload brain plugins. During initialisation this is done in astroid.__init__.py
-        for module in BRAIN_MODULES_DIRECTORY.iterdir():
-            if module.suffix == ".py":
-                module_spec = find_spec(f"astroid.brain.{module.stem}")
-                assert module_spec
-                module_object = module_from_spec(module_spec)
-                assert module_spec.loader
-                module_spec.loader.exec_module(module_object)
+        # Reload brain plugins. During initialisation this is done in astroid.manager.py
+        register_all_brains(self)

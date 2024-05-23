@@ -1,15 +1,15 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """This module contains exceptions used in the astroid library."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 
-from astroid import util
+from astroid.typing import InferenceResult, SuccessfulInferenceResult
 
 if TYPE_CHECKING:
     from astroid import arguments, bases, nodes, objects
@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
 __all__ = (
     "AstroidBuildingError",
-    "AstroidBuildingException",
     "AstroidError",
     "AstroidImportError",
     "AstroidIndexError",
@@ -25,7 +24,6 @@ __all__ = (
     "AstroidTypeError",
     "AstroidValueError",
     "AttributeInferenceError",
-    "BinaryOperationError",
     "DuplicateBasesError",
     "InconsistentMroError",
     "InferenceError",
@@ -34,14 +32,12 @@ __all__ = (
     "NameInferenceError",
     "NoDefault",
     "NotFoundError",
-    "OperationError",
     "ParentMissingError",
     "ResolveError",
     "StatementMissing",
     "SuperArgumentTypeError",
     "SuperError",
     "TooManyLevelsError",
-    "UnaryOperationError",
     "UnresolvableName",
     "UseInferenceDefault",
 )
@@ -187,7 +183,7 @@ class MroError(ResolveError):
     def __init__(
         self,
         message: str,
-        mros: list[nodes.ClassDef],
+        mros: Iterable[Iterable[nodes.ClassDef]],
         cls: nodes.ClassDef,
         context: InferenceContext | None = None,
         **kws: Any,
@@ -237,18 +233,18 @@ class InferenceError(ResolveError):  # pylint: disable=too-many-instance-attribu
     def __init__(  # pylint: disable=too-many-arguments
         self,
         message: str = "Inference failed for {node!r}.",
-        node: nodes.NodeNG | bases.Instance | None = None,
+        node: InferenceResult | None = None,
         context: InferenceContext | None = None,
-        target: nodes.NodeNG | bases.Instance | None = None,
-        targets: nodes.Tuple | None = None,
+        target: InferenceResult | None = None,
+        targets: InferenceResult | None = None,
         attribute: str | None = None,
-        unknown: nodes.NodeNG | bases.Instance | None = None,
+        unknown: InferenceResult | None = None,
         assign_path: list[int] | None = None,
-        caller: nodes.Call | None = None,
-        stmts: Sequence[nodes.NodeNG | bases.Instance] | None = None,
-        frame: nodes.LocalsDictNodeNG | None = None,
+        caller: SuccessfulInferenceResult | None = None,
+        stmts: Iterator[InferenceResult] | None = None,
+        frame: InferenceResult | None = None,
         call_site: arguments.CallSite | None = None,
-        func: nodes.FunctionDef | None = None,
+        func: InferenceResult | None = None,
         arg: str | None = None,
         positional_arguments: list | None = None,
         unpacked_args: list | None = None,
@@ -314,7 +310,7 @@ class AttributeInferenceError(ResolveError):
         self,
         message: str = "{attribute!r} not found on {target!r}.",
         attribute: str = "",
-        target: nodes.NodeNG | bases.Instance | None = None,
+        target: nodes.NodeNG | bases.BaseInstance | None = None,
         context: InferenceContext | None = None,
         mros: list[nodes.ClassDef] | None = None,
         super_: nodes.ClassDef | None = None,
@@ -415,12 +411,6 @@ class StatementMissing(ParentMissingError):
         )
 
 
-# Backwards-compatibility aliases
-OperationError = util.BadOperationMessage
-UnaryOperationError = util.BadUnaryOperationMessage
-BinaryOperationError = util.BadBinaryOperationMessage
-
 SuperArgumentTypeError = SuperError
 UnresolvableName = NameInferenceError
 NotFoundError = AttributeInferenceError
-AstroidBuildingException = AstroidBuildingError

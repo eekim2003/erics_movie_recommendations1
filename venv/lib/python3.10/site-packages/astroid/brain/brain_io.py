@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid brain hints for some of the _io C objects."""
 from astroid.manager import AstroidManager
@@ -35,9 +35,10 @@ def _transform_buffered(node):
     return _generic_io_transform(node, name="raw", cls=FileIO)
 
 
-AstroidManager().register_transform(
-    ClassDef, _transform_buffered, lambda node: node.name in BUFFERED
-)
-AstroidManager().register_transform(
-    ClassDef, _transform_text_io_wrapper, lambda node: node.name == TextIOWrapper
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        ClassDef, _transform_buffered, lambda node: node.name in BUFFERED
+    )
+    manager.register_transform(
+        ClassDef, _transform_text_io_wrapper, lambda node: node.name == TextIOWrapper
+    )

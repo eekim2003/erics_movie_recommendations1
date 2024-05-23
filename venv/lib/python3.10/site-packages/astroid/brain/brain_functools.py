@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid hooks for understanding functools library module."""
 
@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from functools import partial
 from itertools import chain
 
-from astroid import BoundMethod, arguments, extract_node, helpers, nodes, objects
+from astroid import BoundMethod, arguments, extract_node, nodes, objects
 from astroid.context import InferenceContext
 from astroid.exceptions import InferenceError, UseInferenceDefault
 from astroid.inference_tip import inference_tip
@@ -18,7 +18,8 @@ from astroid.interpreter import objectmodel
 from astroid.manager import AstroidManager
 from astroid.nodes.node_classes import AssignName, Attribute, Call, Name
 from astroid.nodes.scoped_nodes import FunctionDef
-from astroid.util import UninferableBase
+from astroid.typing import InferenceResult, SuccessfulInferenceResult
+from astroid.util import UninferableBase, safe_infer
 
 LRU_CACHE = "functools.lru_cache"
 
@@ -45,9 +46,13 @@ class LruWrappedModel(objectmodel.FunctionModel):
 
         class CacheInfoBoundMethod(BoundMethod):
             def infer_call_result(
-                self, caller, context: InferenceContext | None = None
-            ):
-                yield helpers.safe_infer(cache_info)
+                self,
+                caller: SuccessfulInferenceResult | None,
+                context: InferenceContext | None = None,
+            ) -> Iterator[InferenceResult]:
+                res = safe_infer(cache_info)
+                assert res is not None
+                yield res
 
         return CacheInfoBoundMethod(proxy=self._instance, bound=self._instance)
 
@@ -59,7 +64,7 @@ class LruWrappedModel(objectmodel.FunctionModel):
 
 def _transform_lru_cache(node, context: InferenceContext | None = None) -> None:
     # TODO: this is not ideal, since the node should be immutable,
-    # but due to https://github.com/PyCQA/astroid/issues/354,
+    # but due to https://github.com/pylint-dev/astroid/issues/354,
     # there's not much we can do now.
     # Replacing the node would work partially, because,
     # in pylint, the old node would still be available, leading
@@ -129,15 +134,17 @@ def _looks_like_lru_cache(node) -> bool:
     if not node.decorators:
         return False
     for decorator in node.decorators.nodes:
-        if not isinstance(decorator, Call):
+        if not isinstance(decorator, (Attribute, Call)):
             continue
         if _looks_like_functools_member(decorator, "lru_cache"):
             return True
     return False
 
 
-def _looks_like_functools_member(node, member) -> bool:
-    """Check if the given Call node is a functools.partial call."""
+def _looks_like_functools_member(node: Attribute | Call, member: str) -> bool:
+    """Check if the given Call node is the wanted member of functools."""
+    if isinstance(node, Attribute):
+        return node.attrname == member
     if isinstance(node.func, Name):
         return node.func.name == member
     if isinstance(node.func, Attribute):
@@ -152,13 +159,11 @@ def _looks_like_functools_member(node, member) -> bool:
 _looks_like_partial = partial(_looks_like_functools_member, member="partial")
 
 
-AstroidManager().register_transform(
-    FunctionDef, _transform_lru_cache, _looks_like_lru_cache
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(FunctionDef, _transform_lru_cache, _looks_like_lru_cache)
 
-
-AstroidManager().register_transform(
-    Call,
-    inference_tip(_functools_partial_inference),
-    _looks_like_partial,
-)
+    manager.register_transform(
+        Call,
+        inference_tip(_functools_partial_inference),
+        _looks_like_partial,
+    )

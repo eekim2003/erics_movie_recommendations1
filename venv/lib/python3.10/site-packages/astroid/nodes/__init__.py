@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Every available node class.
 
@@ -11,11 +11,7 @@ All nodes inherit from :class:`~astroid.nodes.node_classes.NodeNG`.
 """
 
 # Nodes not present in the builtin ast module:  DictUnpack, Unknown, and EvaluatedObject.
-
-# This is the only node we re-export from the private _base_nodes module. This
-# is because it was originally part of the public API and hasn't been deprecated.
-from astroid.nodes._base_nodes import Statement
-from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (Ellipsis)
+from astroid.nodes.node_classes import (
     CONST_CLS,
     AnnAssign,
     Arguments,
@@ -43,12 +39,10 @@ from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (E
     DelName,
     Dict,
     DictUnpack,
-    Ellipsis,
     EmptyNode,
     EvaluatedObject,
     ExceptHandler,
     Expr,
-    ExtSlice,
     For,
     FormattedValue,
     Global,
@@ -56,7 +50,6 @@ from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (E
     IfExp,
     Import,
     ImportFrom,
-    Index,
     JoinedStr,
     Keyword,
     List,
@@ -74,6 +67,7 @@ from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (E
     NamedExpr,
     NodeNG,
     Nonlocal,
+    ParamSpec,
     Pass,
     Pattern,
     Raise,
@@ -82,10 +76,12 @@ from astroid.nodes.node_classes import (  # pylint: disable=redefined-builtin (E
     Slice,
     Starred,
     Subscript,
-    TryExcept,
-    TryFinally,
+    Try,
     TryStar,
     Tuple,
+    TypeAlias,
+    TypeVar,
+    TypeVarTuple,
     UnaryOp,
     Unknown,
     While,
@@ -114,10 +110,7 @@ from astroid.nodes.scoped_nodes import (
 )
 from astroid.nodes.utils import Position
 
-_BaseContainer = BaseContainer  # TODO Remove for astroid 3.0
-
 ALL_NODE_CLASSES = (
-    _BaseContainer,
     BaseContainer,
     AnnAssign,
     Arguments,
@@ -149,12 +142,10 @@ ALL_NODE_CLASSES = (
     Dict,
     DictComp,
     DictUnpack,
-    Ellipsis,
     EmptyNode,
     EvaluatedObject,
     ExceptHandler,
     Expr,
-    ExtSlice,
     For,
     FormattedValue,
     FunctionDef,
@@ -164,7 +155,6 @@ ALL_NODE_CLASSES = (
     IfExp,
     Import,
     ImportFrom,
-    Index,
     JoinedStr,
     Keyword,
     Lambda,
@@ -186,6 +176,7 @@ ALL_NODE_CLASSES = (
     NamedExpr,
     NodeNG,
     Nonlocal,
+    ParamSpec,
     Pass,
     Pattern,
     Raise,
@@ -195,10 +186,12 @@ ALL_NODE_CLASSES = (
     Slice,
     Starred,
     Subscript,
-    TryExcept,
-    TryFinally,
+    Try,
     TryStar,
     Tuple,
+    TypeAlias,
+    TypeVar,
+    TypeVarTuple,
     UnaryOp,
     Unknown,
     While,
@@ -221,6 +214,7 @@ __all__ = (
     "Attribute",
     "AugAssign",
     "Await",
+    "BaseContainer",
     "BinOp",
     "BoolOp",
     "Break",
@@ -241,12 +235,10 @@ __all__ = (
     "Dict",
     "DictComp",
     "DictUnpack",
-    "Ellipsis",
     "EmptyNode",
     "EvaluatedObject",
     "ExceptHandler",
     "Expr",
-    "ExtSlice",
     "For",
     "FormattedValue",
     "FunctionDef",
@@ -258,7 +250,6 @@ __all__ = (
     "IfExp",
     "Import",
     "ImportFrom",
-    "Index",
     "JoinedStr",
     "Keyword",
     "Lambda",
@@ -280,6 +271,7 @@ __all__ = (
     "NamedExpr",
     "NodeNG",
     "Nonlocal",
+    "ParamSpec",
     "Pass",
     "Position",
     "Raise",
@@ -288,12 +280,13 @@ __all__ = (
     "SetComp",
     "Slice",
     "Starred",
-    "Statement",
     "Subscript",
-    "TryExcept",
-    "TryFinally",
+    "Try",
     "TryStar",
     "Tuple",
+    "TypeAlias",
+    "TypeVar",
+    "TypeVarTuple",
     "UnaryOp",
     "Unknown",
     "unpack_infer",

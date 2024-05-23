@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 Astroid hook for the dataclasses library.
@@ -14,23 +14,17 @@ dataclasses. References:
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Iterator
-from typing import Tuple, Union
+from typing import Literal, Tuple, Union
 
-from astroid import bases, context, helpers, nodes
+from astroid import bases, context, nodes
 from astroid.builder import parse
 from astroid.const import PY39_PLUS, PY310_PLUS
 from astroid.exceptions import AstroidSyntaxError, InferenceError, UseInferenceDefault
 from astroid.inference_tip import inference_tip
 from astroid.manager import AstroidManager
 from astroid.typing import InferenceResult
-from astroid.util import Uninferable, UninferableBase
-
-if sys.version_info >= (3, 8):
-    from typing import Literal
-else:
-    from typing_extensions import Literal
+from astroid.util import Uninferable, UninferableBase, safe_infer
 
 _FieldDefaultReturn = Union[
     None,
@@ -320,7 +314,9 @@ def _generate_dataclass_init(  # pylint: disable=too-many-locals
             # But we can't represent those as string
             try:
                 # Call str to make sure also Uninferable gets stringified
-                default_str = str(next(property_node.infer_call_result()).as_string())
+                default_str = str(
+                    next(property_node.infer_call_result(None)).as_string()
+                )
             except (InferenceError, StopIteration):
                 pass
         else:
@@ -360,7 +356,7 @@ def _generate_dataclass_init(  # pylint: disable=too-many-locals
             if name in prev_pos_only_store:
                 prev_pos_only_store[name] = (ann_str, default_str)
             elif name in prev_kw_only_store:
-                params = [name] + params
+                params = [name, *params]
                 prev_kw_only_store.pop(name)
             else:
                 params.append(param_str)
@@ -486,7 +482,7 @@ def _looks_like_dataclass_field_call(
     If check_scope is False, skips checking the statement and body.
     """
     if check_scope:
-        stmt = node.statement(future=True)
+        stmt = node.statement()
         scope = stmt.scope()
         if not (
             isinstance(stmt, nodes.AnnAssign)
@@ -532,8 +528,10 @@ def _get_field_default(field_call: nodes.Call) -> _FieldDefaultReturn:
             lineno=field_call.lineno,
             col_offset=field_call.col_offset,
             parent=field_call.parent,
+            end_lineno=field_call.end_lineno,
+            end_col_offset=field_call.end_col_offset,
         )
-        new_call.postinit(func=default_factory)
+        new_call.postinit(func=default_factory, args=[], keywords=[])
         return "default_factory", new_call
 
     return None
@@ -563,7 +561,7 @@ def _is_keyword_only_sentinel(node: nodes.NodeNG) -> bool:
     """Return True if node is the KW_ONLY sentinel."""
     if not PY310_PLUS:
         return False
-    inferred = helpers.safe_infer(node)
+    inferred = safe_infer(node)
     return (
         isinstance(inferred, bases.Instance)
         and inferred.qname() == "dataclasses._KW_ONLY_TYPE"
@@ -619,18 +617,19 @@ def _infer_instance_from_annotation(
         yield klass.instantiate_class()
 
 
-AstroidManager().register_transform(
-    nodes.ClassDef, dataclass_transform, is_decorated_with_dataclass
-)
+def register(manager: AstroidManager) -> None:
+    manager.register_transform(
+        nodes.ClassDef, dataclass_transform, is_decorated_with_dataclass
+    )
 
-AstroidManager().register_transform(
-    nodes.Call,
-    inference_tip(infer_dataclass_field_call, raise_on_overwrite=True),
-    _looks_like_dataclass_field_call,
-)
+    manager.register_transform(
+        nodes.Call,
+        inference_tip(infer_dataclass_field_call, raise_on_overwrite=True),
+        _looks_like_dataclass_field_call,
+    )
 
-AstroidManager().register_transform(
-    nodes.Unknown,
-    inference_tip(infer_dataclass_attribute, raise_on_overwrite=True),
-    _looks_like_dataclass_attribute,
-)
+    manager.register_transform(
+        nodes.Unknown,
+        inference_tip(infer_dataclass_attribute, raise_on_overwrite=True),
+        _looks_like_dataclass_attribute,
+    )

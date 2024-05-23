@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """
 This module contains the classes for "scoped" node, i.e. which are opening a
@@ -13,16 +13,13 @@ from __future__ import annotations
 import io
 import itertools
 import os
-import sys
 import warnings
-from collections.abc import Generator, Iterator
-from functools import lru_cache
-from typing import TYPE_CHECKING, ClassVar, NoReturn, TypeVar, overload
+from collections.abc import Generator, Iterable, Iterator, Sequence
+from functools import cached_property, lru_cache
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NoReturn, TypeVar
 
-from astroid import bases
-from astroid import decorators as decorators_mod
-from astroid import util
-from astroid.const import IS_PYPY, PY38, PY38_PLUS, PY39_PLUS, PYPY_7_3_11_PLUS
+from astroid import bases, protocols, util
+from astroid.const import IS_PYPY, PY38, PY39_PLUS, PYPY_7_3_11_PLUS
 from astroid.context import (
     CallContext,
     InferenceContext,
@@ -37,33 +34,39 @@ from astroid.exceptions import (
     InconsistentMroError,
     InferenceError,
     MroError,
+    ParentMissingError,
     StatementMissing,
     TooManyLevelsError,
 )
 from astroid.interpreter.dunder_lookup import lookup
 from astroid.interpreter.objectmodel import ClassModel, FunctionModel, ModuleModel
 from astroid.manager import AstroidManager
-from astroid.nodes import Arguments, Const, NodeNG, _base_nodes, node_classes
+from astroid.nodes import (
+    Arguments,
+    Const,
+    NodeNG,
+    Unknown,
+    _base_nodes,
+    const_factory,
+    node_classes,
+)
 from astroid.nodes.scoped_nodes.mixin import ComprehensionScope, LocalsDictNodeNG
 from astroid.nodes.scoped_nodes.utils import builtin_lookup
 from astroid.nodes.utils import Position
-from astroid.typing import InferBinaryOp, InferenceResult, SuccessfulInferenceResult
-
-if sys.version_info >= (3, 8):
-    from functools import cached_property
-    from typing import Literal
-else:
-    from typing_extensions import Literal
-
-    from astroid.decorators import cachedproperty as cached_property
+from astroid.typing import (
+    InferBinaryOp,
+    InferenceErrorInfo,
+    InferenceResult,
+    SuccessfulInferenceResult,
+)
 
 if TYPE_CHECKING:
-    from astroid import nodes
+    from astroid import nodes, objects
+    from astroid.nodes._base_nodes import LookupMixIn
 
 
 ITER_METHODS = ("__iter__", "__getitem__")
 EXCEPTION_BASE_CLASSES = frozenset({"Exception", "BaseException"})
-objects = util.lazy_import("objects")
 BUILTIN_DESCRIPTORS = frozenset(
     {"classmethod", "staticmethod", "builtins.classmethod", "builtins.staticmethod"}
 )
@@ -145,24 +148,24 @@ def clean_typing_generic_mro(sequences: list[list[ClassDef]]) -> None:
     bases_mro.pop(position_in_inferred_bases)
 
 
-def clean_duplicates_mro(sequences, cls, context):
+def clean_duplicates_mro(
+    sequences: list[list[ClassDef]],
+    cls: ClassDef,
+    context: InferenceContext | None,
+) -> list[list[ClassDef]]:
     for sequence in sequences:
-        names = [
-            (node.lineno, node.qname()) if node.name else None for node in sequence
-        ]
-        last_index = dict(map(reversed, enumerate(names)))
-        if names and names[0] is not None and last_index[names[0]] != 0:
-            raise DuplicateBasesError(
-                message="Duplicates found in MROs {mros} for {cls!r}.",
-                mros=sequences,
-                cls=cls,
-                context=context,
-            )
-        yield [
-            node
-            for i, (node, name) in enumerate(zip(sequence, names))
-            if name is None or last_index[name] == i
-        ]
+        seen = set()
+        for node in sequence:
+            lineno_and_qname = (node.lineno, node.qname())
+            if lineno_and_qname in seen:
+                raise DuplicateBasesError(
+                    message="Duplicates found in MROs {mros} for {cls!r}.",
+                    mros=sequences,
+                    cls=cls,
+                    context=context,
+                )
+            seen.add(lineno_and_qname)
+    return sequences
 
 
 def function_to_method(n, klass):
@@ -189,11 +192,8 @@ class Module(LocalsDictNodeNG):
 
     _astroid_fields = ("doc_node", "body")
 
-    fromlineno: Literal[0] = 0
-    """The first line that this node appears on in the source code."""
-
-    lineno: Literal[0] = 0
-    """The line that this node appears on in the source code."""
+    doc_node: Const | None
+    """The doc node associated with this node."""
 
     # attributes below are set by the builder module or by raw factories
 
@@ -211,12 +211,17 @@ class Module(LocalsDictNodeNG):
     """The names of special attributes that this module has."""
 
     # names of module attributes available through the global scope
-    scope_attrs = {"__name__", "__doc__", "__file__", "__path__", "__package__"}
+    scope_attrs: ClassVar[set[str]] = {
+        "__name__",
+        "__doc__",
+        "__file__",
+        "__path__",
+        "__package__",
+    }
     """The names of module attributes available through the global scope."""
 
     _other_fields = (
         "name",
-        "doc",
         "file",
         "path",
         "package",
@@ -225,42 +230,16 @@ class Module(LocalsDictNodeNG):
     )
     _other_other_fields = ("locals", "globals")
 
-    col_offset: None
-    end_lineno: None
-    end_col_offset: None
-    parent: None
-
-    @decorators_mod.deprecate_arguments(doc="Use the postinit arg 'doc_node' instead")
     def __init__(
         self,
         name: str,
-        doc: str | None = None,
         file: str | None = None,
-        path: list[str] | None = None,
-        package: bool | None = None,
-        parent: None = None,
-        pure_python: bool | None = True,
+        path: Sequence[str] | None = None,
+        package: bool = False,
+        pure_python: bool = True,
     ) -> None:
-        """
-        :param name: The name of the module.
-
-        :param doc: The module docstring.
-
-        :param file: The path to the file that this ast has been extracted from.
-
-        :param path:
-
-        :param package: Whether the node represents a package or a module.
-
-        :param parent: The parent node in the syntax tree.
-
-        :param pure_python: Whether the ast was built from source.
-        """
         self.name = name
         """The name of the module."""
-
-        self._doc = doc
-        """The module docstring."""
 
         self.file = file
         """The path to the file that this ast has been extracted from.
@@ -277,57 +256,29 @@ class Module(LocalsDictNodeNG):
         self.pure_python = pure_python
         """Whether the ast was built from source."""
 
-        self.globals: dict[str, list[node_classes.NodeNG]]
+        self.globals: dict[str, list[InferenceResult]]
         """A map of the name of a global variable to the node defining the global."""
 
         self.locals = self.globals = {}
         """A map of the name of a local variable to the node defining the local."""
 
-        self.body: list[node_classes.NodeNG] | None = []
+        self.body: list[node_classes.NodeNG] = []
         """The contents of the module."""
-
-        self.doc_node: Const | None = None
-        """The doc node associated with this node."""
 
         self.future_imports: set[str] = set()
         """The imports from ``__future__``."""
 
-        super().__init__(lineno=0, parent=parent)
+        super().__init__(
+            lineno=0, parent=None, col_offset=0, end_lineno=None, end_col_offset=None
+        )
 
     # pylint: enable=redefined-builtin
 
-    def postinit(self, body=None, *, doc_node: Const | None = None):
-        """Do some setup after initialisation.
-
-        :param body: The contents of the module.
-        :type body: list(NodeNG) or None
-        :param doc_node: The doc node associated with this node.
-        """
+    def postinit(
+        self, body: list[node_classes.NodeNG], *, doc_node: Const | None = None
+    ):
         self.body = body
         self.doc_node = doc_node
-        if doc_node:
-            self._doc = doc_node.value
-
-    @property
-    def doc(self) -> str | None:
-        """The module docstring."""
-        warnings.warn(
-            "The 'Module.doc' attribute is deprecated, "
-            "use 'Module.doc_node' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._doc
-
-    @doc.setter
-    def doc(self, value: str | None) -> None:
-        warnings.warn(
-            "Setting the 'Module.doc' attribute is deprecated, "
-            "use 'Module.doc_node' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._doc = value
 
     def _get_stream(self):
         if self.file_bytes is not None:
@@ -345,40 +296,36 @@ class Module(LocalsDictNodeNG):
         """
         return self._get_stream()
 
-    def block_range(self, lineno):
+    def block_range(self, lineno: int) -> tuple[int, int]:
         """Get a range from where this node starts to where this node ends.
 
         :param lineno: Unused.
-        :type lineno: int
 
         :returns: The range of line numbers that this node belongs to.
-        :rtype: tuple(int, int)
         """
         return self.fromlineno, self.tolineno
 
-    def scope_lookup(self, node, name, offset=0):
+    def scope_lookup(
+        self, node: LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[node_classes.NodeNG]]:
         """Lookup where the given variable is assigned.
 
         :param node: The node to look for assignments up to.
             Any assignments after the given node are ignored.
-        :type node: NodeNG
 
         :param name: The name of the variable to find assignments for.
-        :type name: str
 
         :param offset: The line offset to filter statements up to.
-        :type offset: int
 
         :returns: This scope node and the list of assignments associated to the
             given name according to the scope where it has been found (locals,
             globals or builtin).
-        :rtype: tuple(str, list(NodeNG))
         """
         if name in self.scope_attrs and name not in self.locals:
             try:
                 return self, self.getattr(name)
             except AttributeInferenceError:
-                return self, ()
+                return self, []
         return self._scope_lookup(node, name, offset)
 
     def pytype(self) -> Literal["builtins.module"]:
@@ -407,6 +354,8 @@ class Module(LocalsDictNodeNG):
 
         if name in self.special_attributes and not ignore_locals and not name_in_locals:
             result = [self.special_attributes.lookup(name)]
+            if name == "__name__":
+                result.append(const_factory("__main__"))
         elif not ignore_locals and name_in_locals:
             result = self.locals[name]
         elif self.package:
@@ -421,14 +370,14 @@ class Module(LocalsDictNodeNG):
             return result
         raise AttributeInferenceError(target=self, attribute=name, context=context)
 
-    def igetattr(self, name, context: InferenceContext | None = None):
+    def igetattr(
+        self, name: str, context: InferenceContext | None = None
+    ) -> Iterator[InferenceResult]:
         """Infer the possible values of the given variable.
 
         :param name: The name of the variable to infer.
-        :type name: str
 
         :returns: The inferred possible values.
-        :rtype: iterable(NodeNG) or None
         """
         # set lookup name since this is necessary to infer on import nodes for
         # instance
@@ -451,34 +400,18 @@ class Module(LocalsDictNodeNG):
         """
         return self.file is not None and self.file.endswith(".py")
 
-    @overload
-    def statement(self, *, future: None = ...) -> Module:
-        ...
-
-    @overload
-    def statement(self, *, future: Literal[True]) -> NoReturn:
-        ...
-
-    def statement(self, *, future: Literal[None, True] = None) -> Module | NoReturn:
+    def statement(self, *, future: Literal[None, True] = None) -> NoReturn:
         """The first parent node, including self, marked as statement node.
 
-        When called on a :class:`Module` with the future parameter this raises an error.
-
-        TODO: Deprecate the future parameter and only raise StatementMissing
-
-        :raises StatementMissing: If no self has no parent attribute and future is True
+        When called on a :class:`Module` this raises a StatementMissing.
         """
-        if future:
-            raise StatementMissing(target=self)
-        warnings.warn(
-            "In astroid 3.0.0 NodeNG.statement() will return either a nodes.Statement "
-            "or raise a StatementMissing exception. nodes.Module will no longer be "
-            "considered a statement. This behaviour can already be triggered "
-            "by passing 'future=True' to a statement() call.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self
+        if future is not None:
+            warnings.warn(
+                "The future arg will be removed in astroid 4.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        raise StatementMissing(target=self)
 
     def previous_sibling(self):
         """The previous sibling statement.
@@ -505,7 +438,7 @@ class Module(LocalsDictNodeNG):
 
     def import_module(
         self,
-        modname: str | None,
+        modname: str,
         relative_only: bool = False,
         level: int | None = None,
         use_cache: bool = True,
@@ -535,11 +468,13 @@ class Module(LocalsDictNodeNG):
             # skip here
             if relative_only:
                 raise
-        return AstroidManager().ast_from_module_name(modname)
+            # Don't repeat the same operation, e.g. for missing modules
+            # like "_winapi" or "nt" on POSIX systems.
+            if modname == absmodname:
+                raise
+        return AstroidManager().ast_from_module_name(modname, use_cache=use_cache)
 
-    def relative_to_absolute_name(
-        self, modname: str | None, level: int | None
-    ) -> str | None:
+    def relative_to_absolute_name(self, modname: str, level: int | None) -> str:
         """Get the absolute module name for a relative import.
 
         The relative import can be implicit or explicit.
@@ -666,6 +601,11 @@ class Module(LocalsDictNodeNG):
         """
         return self
 
+    def _infer(
+        self, context: InferenceContext | None = None, **kwargs: Any
+    ) -> Generator[Module, None, None]:
+        yield self
+
 
 class GeneratorExp(ComprehensionScope):
     """Class representing an :class:`ast.GeneratorExp` node.
@@ -678,41 +618,23 @@ class GeneratorExp(ComprehensionScope):
 
     _astroid_fields = ("elt", "generators")
     _other_other_fields = ("locals",)
-    elt = None
-    """The element that forms the output of the expression.
-
-    :type: NodeNG or None
-    """
+    elt: NodeNG
+    """The element that forms the output of the expression."""
 
     def __init__(
         self,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
-        """
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
         self.locals = {}
         """A map of the name of a local variable to the node defining the local."""
+
+        self.generators: list[nodes.Comprehension] = []
+        """The generators that are looped through."""
 
         super().__init__(
             lineno=lineno,
@@ -722,19 +644,9 @@ class GeneratorExp(ComprehensionScope):
             parent=parent,
         )
 
-    def postinit(self, elt=None, generators: list[nodes.Comprehension] | None = None):
-        """Do some setup after initialisation.
-
-        :param elt: The element that forms the output of the expression.
-        :type elt: NodeNG or None
-
-        :param generators: The generators that are looped through.
-        """
+    def postinit(self, elt: NodeNG, generators: list[nodes.Comprehension]) -> None:
         self.elt = elt
-        if generators is None:
-            self.generators = []
-        else:
-            self.generators = generators
+        self.generators = generators
 
     def bool_value(self, context: InferenceContext | None = None) -> Literal[True]:
         """Determine the boolean value of this node.
@@ -761,44 +673,21 @@ class DictComp(ComprehensionScope):
 
     _astroid_fields = ("key", "value", "generators")
     _other_other_fields = ("locals",)
-    key = None
-    """What produces the keys.
+    key: NodeNG
+    """What produces the keys."""
 
-    :type: NodeNG or None
-    """
-    value = None
-    """What produces the values.
-
-    :type: NodeNG or None
-    """
+    value: NodeNG
+    """What produces the values."""
 
     def __init__(
         self,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
-        """
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
         self.locals = {}
         """A map of the name of a local variable to the node defining the local."""
 
@@ -811,27 +700,11 @@ class DictComp(ComprehensionScope):
         )
 
     def postinit(
-        self,
-        key=None,
-        value=None,
-        generators: list[nodes.Comprehension] | None = None,
-    ):
-        """Do some setup after initialisation.
-
-        :param key: What produces the keys.
-        :type key: NodeNG or None
-
-        :param value: What produces the values.
-        :type value: NodeNG or None
-
-        :param generators: The generators that are looped through.
-        """
+        self, key: NodeNG, value: NodeNG, generators: list[nodes.Comprehension]
+    ) -> None:
         self.key = key
         self.value = value
-        if generators is None:
-            self.generators = []
-        else:
-            self.generators = generators
+        self.generators = generators
 
     def bool_value(self, context: InferenceContext | None = None):
         """Determine the boolean value of this node.
@@ -860,41 +733,23 @@ class SetComp(ComprehensionScope):
 
     _astroid_fields = ("elt", "generators")
     _other_other_fields = ("locals",)
-    elt = None
-    """The element that forms the output of the expression.
-
-    :type: NodeNG or None
-    """
+    elt: NodeNG
+    """The element that forms the output of the expression."""
 
     def __init__(
         self,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
-        """
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
         self.locals = {}
         """A map of the name of a local variable to the node defining the local."""
+
+        self.generators: list[nodes.Comprehension] = []
+        """The generators that are looped through."""
 
         super().__init__(
             lineno=lineno,
@@ -904,19 +759,9 @@ class SetComp(ComprehensionScope):
             parent=parent,
         )
 
-    def postinit(self, elt=None, generators: list[nodes.Comprehension] | None = None):
-        """Do some setup after initialisation.
-
-        :param elt: The element that forms the output of the expression.
-        :type elt: NodeNG or None
-
-        :param generators: The generators that are looped through.
-        """
+    def postinit(self, elt: NodeNG, generators: list[nodes.Comprehension]) -> None:
         self.elt = elt
-        if generators is None:
-            self.generators = []
-        else:
-            self.generators = generators
+        self.generators = generators
 
     def bool_value(self, context: InferenceContext | None = None):
         """Determine the boolean value of this node.
@@ -945,23 +790,23 @@ class ListComp(ComprehensionScope):
     _astroid_fields = ("elt", "generators")
     _other_other_fields = ("locals",)
 
-    elt = None
-    """The element that forms the output of the expression.
-
-    :type: NodeNG or None
-    """
+    elt: NodeNG
+    """The element that forms the output of the expression."""
 
     def __init__(
         self,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
         self.locals = {}
         """A map of the name of a local variable to the node defining it."""
+
+        self.generators: list[nodes.Comprehension] = []
+        """The generators that are looped through."""
 
         super().__init__(
             lineno=lineno,
@@ -971,20 +816,9 @@ class ListComp(ComprehensionScope):
             parent=parent,
         )
 
-    def postinit(self, elt=None, generators: list[nodes.Comprehension] | None = None):
-        """Do some setup after initialisation.
-
-        :param elt: The element that forms the output of the expression.
-        :type elt: NodeNG or None
-
-        :param generators: The generators that are looped through.
-        :type generators: list(Comprehension) or None
-        """
+    def postinit(self, elt: NodeNG, generators: list[nodes.Comprehension]):
         self.elt = elt
-        if generators is None:
-            self.generators = []
-        else:
-            self.generators = generators
+        self.generators = generators
 
     def bool_value(self, context: InferenceContext | None = None):
         """Determine the boolean value of this node.
@@ -1047,12 +881,18 @@ class Lambda(_base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG):
     <Lambda.<lambda> l.1 at 0x7f23b2e41518>
     """
 
-    _astroid_fields = ("args", "body")
-    _other_other_fields = ("locals",)
+    _astroid_fields: ClassVar[tuple[str, ...]] = ("args", "body")
+    _other_other_fields: ClassVar[tuple[str, ...]] = ("locals",)
     name = "<lambda>"
     is_lambda = True
     special_attributes = FunctionModel()
     """The names of special attributes that this function has."""
+
+    args: Arguments
+    """The arguments that the function takes."""
+
+    body: NodeNG
+    """The contents of the function body."""
 
     def implicit_parameters(self) -> Literal[0]:
         return 0
@@ -1064,48 +904,21 @@ class Lambda(_base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG):
         :returns: 'method' if this is a method, 'function' otherwise.
         """
         if self.args.arguments and self.args.arguments[0].name == "self":
-            if isinstance(self.parent.scope(), ClassDef):
+            if self.parent and isinstance(self.parent.scope(), ClassDef):
                 return "method"
         return "function"
 
     def __init__(
         self,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
+        end_lineno: int | None,
+        end_col_offset: int | None,
     ):
-        """
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
         self.locals = {}
         """A map of the name of a local variable to the node defining it."""
-
-        self.args: Arguments
-        """The arguments that the function takes."""
-
-        self.body = []
-        """The contents of the function body.
-
-        :type: list(NodeNG)
-        """
 
         self.instance_attrs: dict[str, list[NodeNG]] = {}
 
@@ -1117,18 +930,11 @@ class Lambda(_base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG):
             parent=parent,
         )
 
-    def postinit(self, args: Arguments, body):
-        """Do some setup after initialisation.
-
-        :param args: The arguments that the function takes.
-
-        :param body: The contents of the function body.
-        :type body: list(NodeNG)
-        """
+    def postinit(self, args: Arguments, body: NodeNG) -> None:
         self.args = args
         self.body = body
 
-    def pytype(self) -> Literal["bultins.instancemethod", "builtins.function"]:
+    def pytype(self) -> Literal["builtins.instancemethod", "builtins.function"]:
         """Get the name of the type that this node represents.
 
         :returns: The name of the type.
@@ -1164,47 +970,42 @@ class Lambda(_base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG):
         :rtype: list(str)
         """
         if self.args.arguments:  # maybe None with builtin functions
-            names = _rec_get_names(self.args.arguments)
+            names = [elt.name for elt in self.args.arguments]
         else:
             names = []
-        if self.args.vararg:
-            names.append(self.args.vararg)
-        names += [elt.name for elt in self.args.kwonlyargs]
-        if self.args.kwarg:
-            names.append(self.args.kwarg)
+
         return names
 
-    def infer_call_result(self, caller, context: InferenceContext | None = None):
-        """Infer what the function returns when called.
-
-        :param caller: Unused
-        :type caller: object
-        """
-        # pylint: disable=no-member; github.com/pycqa/astroid/issues/291
-        # args is in fact redefined later on by postinit. Can't be changed
-        # to None due to a strong interaction between Lambda and FunctionDef.
+    def infer_call_result(
+        self,
+        caller: SuccessfulInferenceResult | None,
+        context: InferenceContext | None = None,
+    ) -> Iterator[InferenceResult]:
+        """Infer what the function returns when called."""
         return self.body.infer(context)
 
-    def scope_lookup(self, node, name, offset=0):
+    def scope_lookup(
+        self, node: LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[NodeNG]]:
         """Lookup where the given names is assigned.
 
         :param node: The node to look for assignments up to.
             Any assignments after the given node are ignored.
-        :type node: NodeNG
 
         :param name: The name to find assignments for.
-        :type name: str
 
         :param offset: The line offset to filter statements up to.
-        :type offset: int
 
         :returns: This scope node and the list of assignments associated to the
             given name according to the scope where it has been found (locals,
             globals or builtin).
-        :rtype: tuple(str, list(NodeNG))
         """
-        if node in self.args.defaults or node in self.args.kw_defaults:
-            frame = self.parent.frame(future=True)
+        if (self.args.defaults and node in self.args.defaults) or (
+            self.args.kw_defaults and node in self.args.kw_defaults
+        ):
+            if not self.parent:
+                raise ParentMissingError(target=self)
+            frame = self.parent.frame()
             # line offset to avoid that def func(f=func) resolve the default
             # value to the defined function
             offset = -1
@@ -1250,8 +1051,22 @@ class Lambda(_base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG):
             return found_attrs
         raise AttributeInferenceError(target=self, attribute=name)
 
+    def _infer(
+        self, context: InferenceContext | None = None, **kwargs: Any
+    ) -> Generator[Lambda, None, None]:
+        yield self
 
-class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda):
+    def _get_yield_nodes_skip_functions(self):
+        """A Lambda node can contain a Yield node in the body."""
+        yield from self.body._get_yield_nodes_skip_functions()
+
+
+class FunctionDef(
+    _base_nodes.MultiLineBlockNode,
+    _base_nodes.FilterStmtsBaseNode,
+    _base_nodes.Statement,
+    LocalsDictNodeNG,
+):
     """Class representing an :class:`ast.FunctionDef`.
 
     >>> import astroid
@@ -1263,11 +1078,25 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
     <FunctionDef.my_func l.2 at 0x7f23b2e71e10>
     """
 
-    _astroid_fields = ("decorators", "args", "returns", "doc_node", "body")
+    _astroid_fields = (
+        "decorators",
+        "args",
+        "returns",
+        "type_params",
+        "doc_node",
+        "body",
+    )
     _multi_line_block_fields = ("body",)
     returns = None
-    decorators: node_classes.Decorators | None = None
+
+    decorators: node_classes.Decorators | None
     """The decorators that are applied to this method or function."""
+
+    doc_node: Const | None
+    """The doc node associated with this node."""
+
+    args: Arguments
+    """The arguments that the function takes."""
 
     is_function = True
     """Whether this node indicates a function.
@@ -1289,7 +1118,7 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
     type_comment_returns = None
     """If present, this will contain the return type annotation, passed by a type comment"""
     # attributes below are set by the builder module or by raw factories
-    _other_fields = ("name", "doc", "position")
+    _other_fields = ("name", "position")
     _other_other_fields = (
         "locals",
         "_type",
@@ -1298,54 +1127,37 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
     )
     _type = None
 
-    @decorators_mod.deprecate_arguments(doc="Use the postinit arg 'doc_node' instead")
+    name = "<functiondef>"
+
+    special_attributes = FunctionModel()
+    """The names of special attributes that this function has."""
+
     def __init__(
         self,
-        name=None,
-        doc: str | None = None,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        name: str,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
-        """
-        :param name: The name of the function.
-        :type name: str or None
-
-        :param doc: The function docstring.
-
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
         self.name = name
-        """The name of the function.
+        """The name of the function."""
 
-        :type name: str or None
-        """
+        self.locals = {}
+        """A map of the name of a local variable to the node defining it."""
 
-        self._doc = doc
-        """The function docstring."""
+        self.body: list[NodeNG] = []
+        """The contents of the function body."""
 
-        self.doc_node: Const | None = None
-        """The doc node associated with this node."""
+        self.type_params: list[nodes.TypeVar | nodes.ParamSpec | nodes.TypeVarTuple] = (
+            []
+        )
+        """PEP 695 (Python 3.12+) type params, e.g. first 'T' in def func[T]() -> T: ..."""
 
-        self.instance_attrs = {}
+        self.instance_attrs: dict[str, list[NodeNG]] = {}
+
         super().__init__(
             lineno=lineno,
             col_offset=col_offset,
@@ -1353,14 +1165,14 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
             end_col_offset=end_col_offset,
             parent=parent,
         )
-        if parent:
-            frame = parent.frame(future=True)
+        if parent and not isinstance(parent, Unknown):
+            frame = parent.frame()
             frame.set_local(name, self)
 
     def postinit(
         self,
         args: Arguments,
-        body,
+        body: list[NodeNG],
         decorators: node_classes.Decorators | None = None,
         returns=None,
         type_comment_returns=None,
@@ -1368,17 +1180,18 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         *,
         position: Position | None = None,
         doc_node: Const | None = None,
+        type_params: (
+            list[nodes.TypeVar | nodes.ParamSpec | nodes.TypeVarTuple] | None
+        ) = None,
     ):
         """Do some setup after initialisation.
 
         :param args: The arguments that the function takes.
 
         :param body: The contents of the function body.
-        :type body: list(NodeNG)
 
         :param decorators: The decorators that are applied to this
             method or function.
-        :type decorators: Decorators or None
         :params type_comment_returns:
             The return type annotation passed via a type comment.
         :params type_comment_args:
@@ -1387,6 +1200,8 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
             Position of function keyword(s) and name.
         :param doc_node:
             The doc node associated with this node.
+        :param type_params:
+            The type_params associated with this node.
         """
         self.args = args
         self.body = body
@@ -1396,29 +1211,7 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         self.type_comment_args = type_comment_args
         self.position = position
         self.doc_node = doc_node
-        if doc_node:
-            self._doc = doc_node.value
-
-    @property
-    def doc(self) -> str | None:
-        """The function docstring."""
-        warnings.warn(
-            "The 'FunctionDef.doc' attribute is deprecated, "
-            "use 'FunctionDef.doc_node' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._doc
-
-    @doc.setter
-    def doc(self, value: str | None) -> None:
-        warnings.warn(
-            "Setting the 'FunctionDef.doc' attribute is deprecated, "
-            "use 'FunctionDef.doc_node' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._doc = value
+        self.type_params = type_params or []
 
     @cached_property
     def extra_decorators(self) -> list[node_classes.Call]:
@@ -1429,12 +1222,11 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         The property will return all the callables that are used for
         decoration.
         """
-        frame = self.parent.frame(future=True)
-        if not isinstance(frame, ClassDef):
+        if not self.parent or not isinstance(frame := self.parent.frame(), ClassDef):
             return []
 
         decorators: list[node_classes.Call] = []
-        for assign in frame._get_assign_nodes():
+        for assign in frame._assign_nodes_in_scope:
             if isinstance(assign.value, node_classes.Call) and isinstance(
                 assign.value.func, node_classes.Name
             ):
@@ -1456,10 +1248,62 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
                         # original method.
                         if (
                             isinstance(meth, FunctionDef)
-                            and assign_node.frame(future=True) == frame
+                            and assign_node.frame() == frame
                         ):
                             decorators.append(assign.value)
         return decorators
+
+    def pytype(self) -> Literal["builtins.instancemethod", "builtins.function"]:
+        """Get the name of the type that this node represents.
+
+        :returns: The name of the type.
+        """
+        if "method" in self.type:
+            return "builtins.instancemethod"
+        return "builtins.function"
+
+    def display_type(self) -> str:
+        """A human readable type of this node.
+
+        :returns: The type of this node.
+        :rtype: str
+        """
+        if "method" in self.type:
+            return "Method"
+        return "Function"
+
+    def callable(self) -> Literal[True]:
+        return True
+
+    def argnames(self) -> list[str]:
+        """Get the names of each of the arguments, including that
+        of the collections of variable-length arguments ("args", "kwargs",
+        etc.), as well as positional-only and keyword-only arguments.
+
+        :returns: The names of the arguments.
+        :rtype: list(str)
+        """
+        if self.args.arguments:  # maybe None with builtin functions
+            names = [elt.name for elt in self.args.arguments]
+        else:
+            names = []
+
+        return names
+
+    def getattr(
+        self, name: str, context: InferenceContext | None = None
+    ) -> list[NodeNG]:
+        if not name:
+            raise AttributeInferenceError(target=self, attribute=name, context=context)
+
+        found_attrs = []
+        if name in self.instance_attrs:
+            found_attrs = self.instance_attrs[name]
+        if name in self.special_attributes:
+            found_attrs.append(self.special_attributes.lookup(name))
+        if found_attrs:
+            return found_attrs
+        raise AttributeInferenceError(target=self, attribute=name)
 
     @cached_property
     def type(self) -> str:  # pylint: disable=too-many-return-statements # noqa: C901
@@ -1471,7 +1315,10 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
             if decorator.func.name in BUILTIN_DESCRIPTORS:
                 return decorator.func.name
 
-        frame = self.parent.frame(future=True)
+        if not self.parent:
+            raise ParentMissingError(target=self)
+
+        frame = self.parent.frame()
         type_name = "function"
         if isinstance(frame, ClassDef):
             if self.name == "__new__":
@@ -1532,17 +1379,20 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         return type_name
 
     @cached_property
-    def fromlineno(self) -> int | None:
-        """The first line that this node appears on in the source code."""
+    def fromlineno(self) -> int:
+        """The first line that this node appears on in the source code.
+
+        Can also return 0 if the line can not be determined.
+        """
         # lineno is the line number of the first decorator, we want the def
         # statement lineno. Similar to 'ClassDef.fromlineno'
-        lineno = self.lineno
+        lineno = self.lineno or 0
         if self.decorators is not None:
             lineno += sum(
-                node.tolineno - node.lineno + 1 for node in self.decorators.nodes
+                node.tolineno - (node.lineno or 0) + 1 for node in self.decorators.nodes
             )
 
-        return lineno
+        return lineno or 0
 
     @cached_property
     def blockstart_tolineno(self):
@@ -1555,18 +1405,18 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
     def implicit_parameters(self) -> Literal[0, 1]:
         return 1 if self.is_bound() else 0
 
-    def block_range(self, lineno):
+    def block_range(self, lineno: int) -> tuple[int, int]:
         """Get a range from the given line number to where this node ends.
 
         :param lineno: Unused.
-        :type lineno: int
 
         :returns: The range of line numbers that this node belongs to,
-        :rtype: tuple(int, int)
         """
         return self.fromlineno, self.tolineno
 
-    def igetattr(self, name, context: InferenceContext | None = None):
+    def igetattr(
+        self, name: str, context: InferenceContext | None = None
+    ) -> Iterator[InferenceResult]:
         """Inferred getattr, which returns an iterator of inferred statements."""
         try:
             return bases._infer_stmts(self.getattr(name, context), context, frame=self)
@@ -1582,18 +1432,18 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         """
         # check we are defined in a ClassDef, because this is usually expected
         # (e.g. pylint...) when is_method() return True
-        return self.type != "function" and isinstance(
-            self.parent.frame(future=True), ClassDef
+        return (
+            self.type != "function"
+            and self.parent is not None
+            and isinstance(self.parent.frame(), ClassDef)
         )
 
-    @decorators_mod.cached
-    def decoratornames(self, context: InferenceContext | None = None):
+    def decoratornames(self, context: InferenceContext | None = None) -> set[str]:
         """Get the qualified names of each of the decorators on this function.
 
         :param context:
             An inference context that can be passed to inference functions
         :returns: The names of the decorators.
-        :rtype: set(str)
         """
         result = set()
         decoratornodes = []
@@ -1656,7 +1506,50 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
 
         :returns: Whether this is a generator function.
         """
-        return bool(next(self._get_yield_nodes_skip_lambdas(), False))
+        yields_without_lambdas = set(self._get_yield_nodes_skip_lambdas())
+        yields_without_functions = set(self._get_yield_nodes_skip_functions())
+        # Want an intersecting member that is neither in a lambda nor a function
+        return bool(yields_without_lambdas & yields_without_functions)
+
+    def _infer(
+        self, context: InferenceContext | None = None, **kwargs: Any
+    ) -> Generator[objects.Property | FunctionDef, None, InferenceErrorInfo]:
+        from astroid import objects  # pylint: disable=import-outside-toplevel
+
+        if not self.decorators or not bases._is_property(self):
+            yield self
+            return InferenceErrorInfo(node=self, context=context)
+
+        # When inferring a property, we instantiate a new `objects.Property` object,
+        # which in turn, because it inherits from `FunctionDef`, sets itself in the locals
+        # of the wrapping frame. This means that every time we infer a property, the locals
+        # are mutated with a new instance of the property. To avoid this, we detect this
+        # scenario and avoid passing the `parent` argument to the constructor.
+        if not self.parent:
+            raise ParentMissingError(target=self)
+        parent_frame = self.parent.frame()
+        property_already_in_parent_locals = self.name in parent_frame.locals and any(
+            isinstance(val, objects.Property) for val in parent_frame.locals[self.name]
+        )
+        # We also don't want to pass parent if the definition is within a Try node
+        if isinstance(
+            self.parent,
+            (node_classes.Try, node_classes.If),
+        ):
+            property_already_in_parent_locals = True
+
+        prop_func = objects.Property(
+            function=self,
+            name=self.name,
+            lineno=self.lineno,
+            parent=self.parent if not property_already_in_parent_locals else None,
+            col_offset=self.col_offset,
+        )
+        if property_already_in_parent_locals:
+            prop_func.parent = self.parent
+        prop_func.postinit(body=[], args=self.args, doc_node=self.doc_node)
+        yield prop_func
+        return InferenceErrorInfo(node=self, context=context)
 
     def infer_yield_result(self, context: InferenceContext | None = None):
         """Infer what the function yields when called
@@ -1665,7 +1558,7 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         :rtype: iterable(NodeNG or Uninferable) or None
         """
         # pylint: disable=not-an-iterable
-        # https://github.com/PyCQA/astroid/issues/1015
+        # https://github.com/pylint-dev/astroid/issues/1015
         for yield_ in self.nodes_of_class(node_classes.Yield):
             if yield_.value is None:
                 const = node_classes.Const(None)
@@ -1675,15 +1568,15 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
             elif yield_.scope() == self:
                 yield from yield_.value.infer(context=context)
 
-    def infer_call_result(self, caller=None, context: InferenceContext | None = None):
-        """Infer what the function returns when called.
-
-        :returns: What the function returns.
-        :rtype: iterable(NodeNG or Uninferable) or None
-        """
+    def infer_call_result(
+        self,
+        caller: SuccessfulInferenceResult | None,
+        context: InferenceContext | None = None,
+    ) -> Iterator[InferenceResult]:
+        """Infer what the function returns when called."""
         if self.is_generator():
             if isinstance(self, AsyncFunctionDef):
-                generator_cls = bases.AsyncGenerator
+                generator_cls: type[bases.Generator] = bases.AsyncGenerator
             else:
                 generator_cls = bases.Generator
             result = generator_cls(self, generator_initial_context=context)
@@ -1698,10 +1591,12 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
         if (
             self.name == "with_metaclass"
             and caller is not None
+            and self.args.args
             and len(self.args.args) == 1
             and self.args.vararg is not None
         ):
             if isinstance(caller.args, Arguments):
+                assert caller.args.args is not None
                 metaclass = next(caller.args.args[0].infer(context), None)
             elif isinstance(caller.args, list):
                 metaclass = next(caller.args[0].infer(context), None)
@@ -1715,16 +1610,24 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
                         # Find the first non-None inferred base value
                         next(
                             b
-                            for b in arg.infer(context=context.clone())
+                            for b in arg.infer(
+                                context=context.clone() if context else context
+                            )
                             if not (isinstance(b, Const) and b.value is None)
                         )
                         for arg in caller.args[1:]
                     ]
                 except StopIteration as e:
                     raise InferenceError(node=caller.args[1:], context=context) from e
-                new_class = ClassDef(name="temporary_class")
+                new_class = ClassDef(
+                    name="temporary_class",
+                    lineno=0,
+                    col_offset=0,
+                    end_lineno=0,
+                    end_col_offset=0,
+                    parent=self,
+                )
                 new_class.hide = True
-                new_class.parent = self
                 new_class.postinit(
                     bases=[
                         base
@@ -1732,7 +1635,7 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
                         if not isinstance(base, util.UninferableBase)
                     ],
                     body=[],
-                    decorators=[],
+                    decorators=None,
                     metaclass=metaclass,
                 )
                 yield new_class
@@ -1775,20 +1678,35 @@ class FunctionDef(_base_nodes.MultiLineBlockNode, _base_nodes.Statement, Lambda)
 
         if self.returns is not None:
             yield self.returns
+        yield from self.type_params
 
         yield from self.body
 
-    def scope_lookup(self, node, name, offset=0):
+    def scope_lookup(
+        self, node: LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[nodes.NodeNG]]:
         """Lookup where the given name is assigned."""
         if name == "__class__":
             # __class__ is an implicit closure reference created by the compiler
             # if any methods in a class body refer to either __class__ or super.
             # In our case, we want to be able to look it up in the current scope
             # when `__class__` is being used.
-            frame = self.parent.frame(future=True)
-            if isinstance(frame, ClassDef):
+            if self.parent and isinstance(frame := self.parent.frame(), ClassDef):
                 return self, [frame]
-        return super().scope_lookup(node, name, offset)
+
+        if (self.args.defaults and node in self.args.defaults) or (
+            self.args.kw_defaults and node in self.args.kw_defaults
+        ):
+            if not self.parent:
+                raise ParentMissingError(target=self)
+            frame = self.parent.frame()
+            # line offset to avoid that def func(f=func) resolve the default
+            # value to the defined function
+            offset = -1
+        else:
+            # check this is not used in function decorators
+            frame = self
+        return frame._scope_lookup(node, name, offset)
 
     def frame(self: _T, *, future: Literal[None, True] = None) -> _T:
         """The node's frame node.
@@ -1820,19 +1738,7 @@ class AsyncFunctionDef(FunctionDef):
     """
 
 
-def _rec_get_names(args, names: list[str] | None = None) -> list[str]:
-    """return a list of all argument names"""
-    if names is None:
-        names = []
-    for arg in args:
-        if isinstance(arg, node_classes.Tuple):
-            _rec_get_names(arg.elts, names)
-        else:
-            names.append(arg.name)
-    return names
-
-
-def _is_metaclass(klass, seen=None) -> bool:
+def _is_metaclass(klass, seen=None, context: InferenceContext | None = None) -> bool:
     """Return if the given class can be
     used as a metaclass.
     """
@@ -1842,7 +1748,7 @@ def _is_metaclass(klass, seen=None) -> bool:
         seen = set()
     for base in klass.bases:
         try:
-            for baseobj in base.infer():
+            for baseobj in base.infer(context=context):
                 baseobj_name = baseobj.qname()
                 if baseobj_name in seen:
                     continue
@@ -1857,21 +1763,21 @@ def _is_metaclass(klass, seen=None) -> bool:
                     continue
                 if baseobj._type == "metaclass":
                     return True
-                if _is_metaclass(baseobj, seen):
+                if _is_metaclass(baseobj, seen, context=context):
                     return True
         except InferenceError:
             continue
     return False
 
 
-def _class_type(klass, ancestors=None):
+def _class_type(klass, ancestors=None, context: InferenceContext | None = None):
     """return a ClassDef node type to differ metaclass and exception
     from 'regular' classes
     """
     # XXX we have to store ancestors in case we have an ancestor loop
     if klass._type is not None:
         return klass._type
-    if _is_metaclass(klass):
+    if _is_metaclass(klass, context=context):
         klass._type = "metaclass"
     elif klass.name.endswith("Exception"):
         klass._type = "exception"
@@ -1908,17 +1814,16 @@ def get_wrapping_class(node):
     :rtype: ClassDef or None
     """
 
-    klass = node.frame(future=True)
+    klass = node.frame()
     while klass is not None and not isinstance(klass, ClassDef):
         if klass.parent is None:
             klass = None
         else:
-            klass = klass.parent.frame(future=True)
+            klass = klass.parent.frame()
     return klass
 
 
-# pylint: disable=too-many-instance-attributes
-class ClassDef(
+class ClassDef(  # pylint: disable=too-many-instance-attributes
     _base_nodes.FilterStmtsBaseNode, LocalsDictNodeNG, _base_nodes.Statement
 ):
     """Class representing an :class:`ast.ClassDef` node.
@@ -1937,7 +1842,14 @@ class ClassDef(
     # by a raw factories
 
     # a dictionary of class instances attributes
-    _astroid_fields = ("decorators", "bases", "keywords", "doc_node", "body")  # name
+    _astroid_fields = (
+        "decorators",
+        "bases",
+        "keywords",
+        "doc_node",
+        "body",
+        "type_params",
+    )  # name
 
     decorators = None
     """The decorators that are applied to this class.
@@ -1962,80 +1874,52 @@ class ClassDef(
             ":type: str"
         ),
     )
-    _other_fields = ("name", "doc", "is_dataclass", "position")
+    _other_fields = ("name", "is_dataclass", "position")
     _other_other_fields = ("locals", "_newstyle")
-    _newstyle = None
+    _newstyle: bool | None = None
 
-    @decorators_mod.deprecate_arguments(doc="Use the postinit arg 'doc_node' instead")
     def __init__(
         self,
-        name=None,
-        doc: str | None = None,
-        lineno=None,
-        col_offset=None,
-        parent=None,
+        name: str,
+        lineno: int,
+        col_offset: int,
+        parent: NodeNG,
         *,
-        end_lineno=None,
-        end_col_offset=None,
-    ):
-        """
-        :param name: The name of the class.
-        :type name: str or None
-
-        :param doc: The class docstring.
-
-        :param lineno: The line that this node appears on in the source code.
-        :type lineno: int or None
-
-        :param col_offset: The column that this node appears on in the
-            source code.
-        :type col_offset: int or None
-
-        :param parent: The parent node in the syntax tree.
-        :type parent: NodeNG or None
-
-        :param end_lineno: The last line this node appears on in the source code.
-        :type end_lineno: Optional[int]
-
-        :param end_col_offset: The end column this node appears on in the
-            source code. Note: This is after the last symbol.
-        :type end_col_offset: Optional[int]
-        """
-        self.instance_attrs = {}
+        end_lineno: int | None,
+        end_col_offset: int | None,
+    ) -> None:
+        self.instance_attrs: dict[str, NodeNG] = {}
         self.locals = {}
         """A map of the name of a local variable to the node defining it."""
 
-        self.keywords = []
+        self.keywords: list[node_classes.Keyword] = []
         """The keywords given to the class definition.
 
         This is usually for :pep:`3115` style metaclass declaration.
-
-        :type: list(Keyword) or None
         """
 
-        self.bases: list[NodeNG] = []
+        self.bases: list[SuccessfulInferenceResult] = []
         """What the class inherits from."""
 
-        self.body = []
-        """The contents of the class body.
-
-        :type: list(NodeNG)
-        """
+        self.body: list[NodeNG] = []
+        """The contents of the class body."""
 
         self.name = name
-        """The name of the class.
+        """The name of the class."""
 
-        :type name: str or None
-        """
-
-        self._doc = doc
-        """The class docstring."""
+        self.decorators = None
+        """The decorators that are applied to this class."""
 
         self.doc_node: Const | None = None
         """The doc node associated with this node."""
 
         self.is_dataclass: bool = False
         """Whether this class is a dataclass."""
+
+        self.type_params: list[nodes.TypeVar | nodes.ParamSpec | nodes.TypeVarTuple] = (
+            []
+        )
+        """PEP 695 (Python 3.12+) type params, e.g. class MyClass[T]: ..."""
 
         super().__init__(
             lineno=lineno,
@@ -2044,34 +1928,15 @@ class ClassDef(
             end_col_offset=end_col_offset,
             parent=parent,
         )
-        if parent is not None:
-            parent.frame(future=True).set_local(name, self)
+        if parent and not isinstance(parent, Unknown):
+            parent.frame().set_local(name, self)
 
         for local_name, node in self.implicit_locals():
             self.add_local_node(node, local_name)
 
-    infer_binary_op: ClassVar[InferBinaryOp[ClassDef]]
-
-    @property
-    def doc(self) -> str | None:
-        """The class docstring."""
-        warnings.warn(
-            "The 'ClassDef.doc' attribute is deprecated, "
-            "use 'ClassDef.doc_node' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self._doc
-
-    @doc.setter
-    def doc(self, value: str | None) -> None:
-        warnings.warn(
-            "Setting the 'ClassDef.doc' attribute is deprecated, "
-            "use 'ClassDef.doc_node.value' instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._doc = value
+    infer_binary_op: ClassVar[InferBinaryOp[ClassDef]] = (
+        protocols.instance_class_infer_binary_op
+    )
 
     def implicit_parameters(self) -> Literal[1]:
         return 1
@@ -2090,52 +1955,29 @@ class ClassDef(
     # pylint: disable=redefined-outer-name
     def postinit(
         self,
-        bases,
-        body,
-        decorators,
-        newstyle=None,
+        bases: list[SuccessfulInferenceResult],
+        body: list[NodeNG],
+        decorators: node_classes.Decorators | None,
+        newstyle: bool | None = None,
         metaclass: NodeNG | None = None,
-        keywords=None,
+        keywords: list[node_classes.Keyword] | None = None,
         *,
         position: Position | None = None,
         doc_node: Const | None = None,
-    ):
-        """Do some setup after initialisation.
-
-        :param bases: What the class inherits from.
-        :type bases: list(NodeNG)
-
-        :param body: The contents of the class body.
-        :type body: list(NodeNG)
-
-        :param decorators: The decorators that are applied to this class.
-        :type decorators: Decorators or None
-
-        :param newstyle: Whether this is a new style class or not.
-        :type newstyle: bool or None
-
-        :param metaclass: The metaclass of this class.
-
-        :param keywords: The keywords given to the class definition.
-        :type keywords: list(Keyword) or None
-
-        :param position: Position of class keyword and name.
-
-        :param doc_node: The doc node associated with this node.
-        """
+        type_params: (
+            list[nodes.TypeVar | nodes.ParamSpec | nodes.TypeVarTuple] | None
+        ) = None,
+    ) -> None:
         if keywords is not None:
             self.keywords = keywords
         self.bases = bases
         self.body = body
         self.decorators = decorators
-        if newstyle is not None:
-            self._newstyle = newstyle
-        if metaclass is not None:
-            self._metaclass = metaclass
+        self._newstyle = newstyle
+        self._metaclass = metaclass
         self.position = position
         self.doc_node = doc_node
-        if doc_node:
-            self._doc = doc_node.value
+        self.type_params = type_params or []
 
     def _newstyle_impl(self, context: InferenceContext | None = None):
         if context is None:
@@ -2162,19 +2004,23 @@ class ClassDef(
     )
 
     @cached_property
-    def fromlineno(self) -> int | None:
-        """The first line that this node appears on in the source code."""
-        if not PY38_PLUS or IS_PYPY and PY38 and not PYPY_7_3_11_PLUS:
+    def fromlineno(self) -> int:
+        """The first line that this node appears on in the source code.
+
+        Can also return 0 if the line can not be determined.
+        """
+        if IS_PYPY and PY38 and not PYPY_7_3_11_PLUS:
             # For Python < 3.8 the lineno is the line number of the first decorator.
             # We want the class statement lineno. Similar to 'FunctionDef.fromlineno'
             # PyPy (3.8): Fixed with version v7.3.11
-            lineno = self.lineno
+            lineno = self.lineno or 0
             if self.decorators is not None:
                 lineno += sum(
-                    node.tolineno - node.lineno + 1 for node in self.decorators.nodes
+                    node.tolineno - (node.lineno or 0) + 1
+                    for node in self.decorators.nodes
                 )
 
-            return lineno
+            return lineno or 0
         return super().fromlineno
 
     @cached_property
@@ -2188,14 +2034,12 @@ class ClassDef(
 
         return self.fromlineno
 
-    def block_range(self, lineno):
+    def block_range(self, lineno: int) -> tuple[int, int]:
         """Get a range from the given line number to where this node ends.
 
         :param lineno: Unused.
-        :type lineno: int
 
         :returns: The range of line numbers that this node belongs to,
-        :rtype: tuple(int, int)
         """
         return self.fromlineno, self.tolineno
 
@@ -2249,7 +2093,14 @@ class ClassDef(
         else:
             return util.Uninferable
 
-        result = ClassDef(name)
+        result = ClassDef(
+            name,
+            lineno=0,
+            col_offset=0,
+            end_lineno=0,
+            end_col_offset=0,
+            parent=Unknown(),
+        )
 
         # Get the bases of the class.
         try:
@@ -2285,7 +2136,11 @@ class ClassDef(
         result.parent = caller.parent
         return result
 
-    def infer_call_result(self, caller, context: InferenceContext | None = None):
+    def infer_call_result(
+        self,
+        caller: SuccessfulInferenceResult | None,
+        context: InferenceContext | None = None,
+    ) -> Iterator[InferenceResult]:
         """infer what a class is returning when called"""
         if self.is_subtype_of("builtins.type", context) and len(caller.args) == 3:
             result = self._infer_type_call(caller, context)
@@ -2314,23 +2169,21 @@ class ClassDef(
         else:
             yield self.instantiate_class()
 
-    def scope_lookup(self, node, name, offset=0):
+    def scope_lookup(
+        self, node: LookupMixIn, name: str, offset: int = 0
+    ) -> tuple[LocalsDictNodeNG, list[nodes.NodeNG]]:
         """Lookup where the given name is assigned.
 
         :param node: The node to look for assignments up to.
             Any assignments after the given node are ignored.
-        :type node: NodeNG
 
         :param name: The name to find assignments for.
-        :type name: str
 
         :param offset: The line offset to filter statements up to.
-        :type offset: int
 
         :returns: This scope node and the list of assignments associated to the
             given name according to the scope where it has been found (locals,
             globals or builtin).
-        :rtype: tuple(str, list(NodeNG))
         """
         # If the name looks like a builtin name, just try to look
         # into the upper scope of this class. We might have a
@@ -2341,7 +2194,10 @@ class ClassDef(
             and name in AstroidManager().builtins_module
         )
         if (
-            any(node == base or base.parent_of(node) for base in self.bases)
+            any(
+                node == base or base.parent_of(node) and not self.type_params
+                for base in self.bases
+            )
             or lookup_upper_frame
         ):
             # Handle the case where we have either a name
@@ -2356,8 +2212,9 @@ class ClassDef(
             # import name
             # class A(name.Name):
             #     def name(self): ...
-
-            frame = self.parent.frame(future=True)
+            if not self.parent:
+                raise ParentMissingError(target=self)
+            frame = self.parent.frame()
             # line offset to avoid that class A(A) resolve the ancestor to
             # the defined class
             offset = -1
@@ -2390,7 +2247,8 @@ class ClassDef(
         if context is None:
             context = InferenceContext()
         if not self.bases and self.qname() != "builtins.object":
-            yield builtin_lookup("object")[1][0]
+            # This should always be a ClassDef (which we don't assert for)
+            yield builtin_lookup("object")[1][0]  # type: ignore[misc]
             return
 
         for stmt in self.bases:
@@ -2432,7 +2290,7 @@ class ClassDef(
         # Look up in the mro if we can. This will result in the
         # attribute being looked up just as Python does it.
         try:
-            ancestors = self.mro(context)[1:]
+            ancestors: Iterable[ClassDef] = self.mro(context)[1:]
         except MroError:
             # Fallback to use ancestors, we can't determine
             # a sane MRO.
@@ -2515,6 +2373,8 @@ class ClassDef(
 
         :returns: An :class:`Instance` of the :class:`ClassDef` node
         """
+        from astroid import objects  # pylint: disable=import-outside-toplevel
+
         try:
             if any(cls.name in EXCEPTION_BASE_CLASSES for cls in self.mro()):
                 # Subclasses of exceptions can be exception instances
@@ -2528,7 +2388,7 @@ class ClassDef(
         name: str,
         context: InferenceContext | None = None,
         class_context: bool = True,
-    ) -> list[SuccessfulInferenceResult]:
+    ) -> list[InferenceResult]:
         """Get an attribute from this class, using Python's attribute semantic.
 
         This method doesn't look in the :attr:`instance_attrs` dictionary
@@ -2555,7 +2415,7 @@ class ClassDef(
             raise AttributeInferenceError(target=self, attribute=name, context=context)
 
         # don't modify the list in self.locals!
-        values: list[SuccessfulInferenceResult] = list(self.locals.get(name, []))
+        values: list[InferenceResult] = list(self.locals.get(name, []))
         for classnode in self.ancestors(recurs=True, context=context):
             values += classnode.locals.get(name, [])
 
@@ -2573,7 +2433,7 @@ class ClassDef(
         # Remove AnnAssigns without value, which are not attributes in the purest sense.
         for value in values.copy():
             if isinstance(value, node_classes.AssignName):
-                stmt = value.statement(future=True)
+                stmt = value.statement()
                 if isinstance(stmt, node_classes.AnnAssign) and stmt.value is None:
                     values.pop(values.index(value))
 
@@ -2596,6 +2456,8 @@ class ClassDef(
         return attrs
 
     def _get_attribute_from_metaclass(self, cls, name, context):
+        from astroid import objects  # pylint: disable=import-outside-toplevel
+
         try:
             attrs = cls.getattr(name, context=context, class_context=True)
         except AttributeInferenceError:
@@ -2634,6 +2496,8 @@ class ClassDef(
 
         :returns: The inferred possible values.
         """
+        from astroid import objects  # pylint: disable=import-outside-toplevel
+
         # set lookup name since this is necessary to infer on import nodes for
         # instance
         context = copy_context(context)
@@ -2647,11 +2511,20 @@ class ClassDef(
             # to the attribute happening *after* the attribute's definition (e.g. AugAssigns on lists)
             if len(attributes) > 1:
                 first_attr, attributes = attributes[0], attributes[1:]
-                first_scope = first_attr.scope()
+                first_scope = first_attr.parent.scope()
                 attributes = [first_attr] + [
                     attr
                     for attr in attributes
                     if attr.parent and attr.parent.scope() == first_scope
+                ]
+            functions = [attr for attr in attributes if isinstance(attr, FunctionDef)]
+            if functions:
+                # Prefer only the last function, unless a property is involved.
+                last_function = functions[-1]
+                attributes = [
+                    a
+                    for a in attributes
+                    if a not in functions or a is last_function or bases._is_property(a)
                 ]
 
             for inferred in bases._infer_stmts(attributes, context, frame=self):
@@ -2733,7 +2606,7 @@ class ClassDef(
             ``__getitem__`` method.
         """
         try:
-            methods = lookup(self, "__getitem__")
+            methods = lookup(self, "__getitem__", context=context)
         except AttributeInferenceError as exc:
             if isinstance(self, ClassDef):
                 # subscripting a class definition may be
@@ -2814,7 +2687,7 @@ class ClassDef(
 
     def declared_metaclass(
         self, context: InferenceContext | None = None
-    ) -> NodeNG | None:
+    ) -> SuccessfulInferenceResult | None:
         """Return the explicit declared metaclass for the current class.
 
         An explicit declared metaclass is defined
@@ -2851,7 +2724,7 @@ class ClassDef(
 
     def _find_metaclass(
         self, seen: set[ClassDef] | None = None, context: InferenceContext | None = None
-    ) -> NodeNG | None:
+    ) -> SuccessfulInferenceResult | None:
         if seen is None:
             seen = set()
         seen.add(self)
@@ -2865,7 +2738,9 @@ class ClassDef(
                         break
         return klass
 
-    def metaclass(self, context: InferenceContext | None = None) -> NodeNG | None:
+    def metaclass(
+        self, context: InferenceContext | None = None
+    ) -> SuccessfulInferenceResult | None:
         """Get the metaclass of this class.
 
         If this class does not define explicitly a metaclass,
@@ -2944,11 +2819,11 @@ class ClassDef(
             if exc.args and exc.args[0] not in ("", None):
                 return exc.args[0]
             return None
-        return [first] + list(slots)
+        return [first, *slots]
 
     # Cached, because inferring them all the time is expensive
-    @decorators_mod.cached
-    def slots(self):
+    @cached_property
+    def _all_slots(self):
         """Get all the slots for this node.
 
         :returns: The names of slots for this class.
@@ -2992,6 +2867,9 @@ class ClassDef(
 
         return sorted(set(slots), key=lambda item: item.value)
 
+    def slots(self):
+        return self._all_slots
+
     def _inferred_bases(self, context: InferenceContext | None = None):
         # Similar with .ancestors, but the difference is when one base is inferred,
         # only the first object is wanted. That's because
@@ -3032,6 +2910,9 @@ class ClassDef(
                 yield from baseobj.bases
 
     def _compute_mro(self, context: InferenceContext | None = None):
+        if self.qname() == "builtins.object":
+            return [self]
+
         inferred_bases = list(self._inferred_bases(context=context))
         bases_mro = []
         for base in inferred_bases:
@@ -3050,8 +2931,8 @@ class ClassDef(
                 ancestors = list(base.ancestors(context=context))
                 bases_mro.append(ancestors)
 
-        unmerged_mro = [[self]] + bases_mro + [inferred_bases]
-        unmerged_mro = list(clean_duplicates_mro(unmerged_mro, self, context))
+        unmerged_mro: list[list[ClassDef]] = [[self], *bases_mro, inferred_bases]
+        unmerged_mro = clean_duplicates_mro(unmerged_mro, self, context)
         clean_typing_generic_mro(unmerged_mro)
         return _c3_merge(unmerged_mro, self, context)
 
@@ -3080,12 +2961,14 @@ class ClassDef(
         yield from self.bases
         if self.keywords is not None:
             yield from self.keywords
+        yield from self.type_params
+
         yield from self.body
 
-    @decorators_mod.cached
-    def _get_assign_nodes(self):
+    @cached_property
+    def _assign_nodes_in_scope(self):
         children_assign_nodes = (
-            child_node._get_assign_nodes() for child_node in self.body
+            child_node._assign_nodes_in_scope for child_node in self.body
         )
         return list(itertools.chain.from_iterable(children_assign_nodes))
 
@@ -3098,3 +2981,8 @@ class ClassDef(
         :returns: The node itself.
         """
         return self
+
+    def _infer(
+        self, context: InferenceContext | None = None, **kwargs: Any
+    ) -> Generator[ClassDef, None, None]:
+        yield self

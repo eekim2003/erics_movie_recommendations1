@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """The AstroidBuilder makes astroid from living object and / or from _ast.
 
@@ -14,21 +14,16 @@ import ast
 import os
 import textwrap
 import types
+import warnings
 from collections.abc import Iterator, Sequence
 from io import TextIOWrapper
 from tokenize import detect_encoding
-from typing import TYPE_CHECKING
 
 from astroid import bases, modutils, nodes, raw_building, rebuilder, util
 from astroid._ast import ParserModule, get_parser_module
+from astroid.const import PY312_PLUS
 from astroid.exceptions import AstroidBuildingError, AstroidSyntaxError, InferenceError
 from astroid.manager import AstroidManager
-
-if TYPE_CHECKING:
-    from astroid import objects
-else:
-    objects = util.lazy_import("objects")
-
 
 # The name of the transient function that is used to
 # wrap expressions to be extracted when calling
@@ -39,6 +34,9 @@ _TRANSIENT_FUNCTION = "__"
 # when calling extract_node.
 _STATEMENT_SELECTOR = "#@"
 MISPLACED_TYPE_ANNOTATION_ERROR = "misplaced type annotation"
+
+if PY312_PLUS:
+    warnings.filterwarnings("ignore", "invalid escape sequence", SyntaxWarning)
 
 
 def open_source_file(filename: str) -> tuple[TextIOWrapper, str, str]:
@@ -76,6 +74,8 @@ class AstroidBuilder(raw_building.InspectBuilder):
     ) -> None:
         super().__init__(manager)
         self._apply_transforms = apply_transforms
+        if not raw_building.InspectBuilder.bootstrapped:
+            raw_building._astroid_bootstrapping()
 
     def module_build(
         self, module: types.ModuleType, modname: str | None = None
@@ -178,7 +178,9 @@ class AstroidBuilder(raw_building.InspectBuilder):
     ) -> tuple[nodes.Module, rebuilder.TreeRebuilder]:
         """Build tree node from data and add some informations."""
         try:
-            node, parser_module = _parse_string(data, type_comments=True)
+            node, parser_module = _parse_string(
+                data, type_comments=True, modname=modname
+            )
         except (TypeError, ValueError, SyntaxError) as exc:
             raise AstroidSyntaxError(
                 "Parsing Python code failed:\n{error}",
@@ -235,8 +237,9 @@ class AstroidBuilder(raw_building.InspectBuilder):
 
         This adds name to locals and handle members definition.
         """
+        from astroid import objects  # pylint: disable=import-outside-toplevel
+
         try:
-            frame = node.frame(future=True)
             for inferred in node.expr.infer():
                 if isinstance(inferred, util.UninferableBase):
                     continue
@@ -267,22 +270,15 @@ class AstroidBuilder(raw_building.InspectBuilder):
                 values = iattrs.setdefault(node.attrname, [])
                 if node in values:
                     continue
-                # get assign in __init__ first XXX useful ?
-                if (
-                    frame.name == "__init__"
-                    and values
-                    and values[0].frame(future=True).name != "__init__"
-                ):
-                    values.insert(0, node)
-                else:
-                    values.append(node)
+                values.append(node)
         except InferenceError:
             pass
 
 
 def build_namespace_package_module(name: str, path: Sequence[str]) -> nodes.Module:
-    # TODO: Typing: Remove the cast to list and just update typing to accept Sequence
-    return nodes.Module(name, path=list(path), package=True)
+    module = nodes.Module(name, path=path, package=True)
+    module.postinit(body=[], doc_node=None)
+    return module
 
 
 def parse(
@@ -477,11 +473,13 @@ def _extract_single_node(code: str, module_name: str = "") -> nodes.NodeNG:
 
 
 def _parse_string(
-    data: str, type_comments: bool = True
+    data: str, type_comments: bool = True, modname: str | None = None
 ) -> tuple[ast.Module, ParserModule]:
     parser_module = get_parser_module(type_comments=type_comments)
     try:
-        parsed = parser_module.parse(data + "\n", type_comments=type_comments)
+        parsed = parser_module.parse(
+            data + "\n", type_comments=type_comments, filename=modname
+        )
     except SyntaxError as exc:
         # If the type annotations are misplaced for some reason, we do not want
         # to fail the entire parsing of the file, so we need to retry the parsing without

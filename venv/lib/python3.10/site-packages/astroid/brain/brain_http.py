@@ -1,6 +1,6 @@
 # Licensed under the LGPL: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html
-# For details: https://github.com/PyCQA/astroid/blob/main/LICENSE
-# Copyright (c) https://github.com/PyCQA/astroid/blob/main/CONTRIBUTORS.txt
+# For details: https://github.com/pylint-dev/astroid/blob/main/LICENSE
+# Copyright (c) https://github.com/pylint-dev/astroid/blob/main/CONTRIBUTORS.txt
 
 """Astroid brain hints for some of the `http` module."""
 import textwrap
@@ -208,5 +208,6 @@ def _http_client_transform():
     )
 
 
-register_module_extender(AstroidManager(), "http", _http_transform)
-register_module_extender(AstroidManager(), "http.client", _http_client_transform)
+def register(manager: AstroidManager) -> None:
+    register_module_extender(manager, "http", _http_transform)
+    register_module_extender(manager, "http.client", _http_client_transform)
