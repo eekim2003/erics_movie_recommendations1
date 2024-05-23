@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Recommendations</title>
+</head>
+<body>
+    <h1>Movie Recommendations</h1>
+    {% if recommendations %}
+        <h2>Here are some movie recommendations based on your search:</h2>
+        <ul>
+            {% for movie in recommendations %}
+                <li>{{ movie['title'] }} ({{ movie['genre'] }})</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No recommendations found for your query.</p>
+    {% endif %}
+    <a href="/">Back to search</a>
+</body>
+</html>

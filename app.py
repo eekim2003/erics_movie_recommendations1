@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request
-from werkzeug.urls import url_quote
 import json
 
 app = Flask(__name__)
@@ -13,14 +12,16 @@ def get_recommendations(movies, query):
     recommendations = [movie for movie in movies if query.lower() in movie['title'].lower() or query.lower() in movie['genre'].lower()]
     return recommendations
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def index():
-    if request.method == 'POST':
-        query = request.form['query']
-        movies = load_movies('data/movies.json')
-        recommendations = get_recommendations(movies, query)
-        return render_template('index.html', recommendations=recommendations)
-    return render_template('index.html', recommendations=None)
+    return render_template('index.html')
 
-if __name__ == '__main__':
+@app.route('/recommendations', methods=['POST'])
+def recommendations():
+    query = request.form['query']
+    movies = load_movies('data/movies.json')
+    recommendations = get_recommendations(movies, query)
+    return render_template('recommendations.html', recommendations=recommendations)
+
+if __name__ == "__main__":
     app.run(debug=True)
