@@ -1,71 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movie Recommendations</title>
-  <style>
-      body {
-          font-family: Arial, sans-serif;
-          background-color: #1f9b9d;
-          margin: 0;
-          padding: 20px;
-      }
-      h1 {
-          color: #222222;
-      }
-    ul {
-        list-style-type: none;
-        padding: 0;
-        max-width: 800px; /* Set a maximum width for the list */
-        margin: auto; /* Center the list horizontally */
-    }
-
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Movie Recommendations</title>
+   <style>
+       body {
+           font-family: Arial, sans-serif;
+           background-color: #1f9b9d;
+           margin: 0;
+           padding: 20px;
+       }
+       h1 {
+           color: #222222;
+       }
+       ul {
+           list-style-type: none;
+           padding: 0;
+       }
        li {
-          background-color: rgb(226, 226, 226);
-          margin: 5px 0;
-          padding: 10px;
-          border: 1px solid #ddd;
-          position: relative;
-          max-width: 700px; /* Set a maximum width for each list item */
-          margin: auto; /* Center each list item horizontally */
-          box-sizing: border-box;
-        }
-
-      .rating {
-          position: absolute;
-          top: 0;
-          right: 0;
-          transform: translateY(50%);
-          padding: 0 10px;
-          font-style: italic;
-          color: #555;
-      }
-      a {
-          display: inline-block;
-          margin-top: 20px;
-          padding: 10px 20px;
-          font-size: 16px;
-          background-color: #007BFF;
-          color: white;
-          text-decoration: none;
-      }
-      a:hover {
-          background-color: #0056b3;
-      }
-      .movie-info {
-          display: flex;
-          align-items: center;
-      }
-      .movie-info span {
-          margin-right: 20px;
-      }
-      .movie-info img {
-          margin-right: 10px;
-          max-width: 100px;
-          height: auto;
-      }
-  </style>
+           margin-bottom: 10px; /* Add margin between each movie box */
+       }
+       .movie-box {
+           background-color: rgb(226, 226, 226);
+           padding: 10px;
+           border: 1px solid #ddd;
+           display: flex;
+           align-items: center;
+       }
+       .movie-info {
+           flex: 1; /* Fill remaining space */
+       }
+       .movie-info span {
+           display: block; /* Each movie info on a new line */
+       }
+       .movie-info img {
+           max-width: 100px;
+           height: auto;
+           margin-right: 10px;
+       }
+       .rating {
+           margin-left: auto; /* Push rating to the right */
+           font-style: italic;
+           color: #555;
+       }
+       a {
+           display: inline-block;
+           margin-top: 20px;
+           padding: 10px 20px;
+           font-size: 16px;
+           background-color: #007BFF;
+           color: white;
+           text-decoration: none;
+       }
+       a:hover {
+           background-color: #0056b3;
+       }
+   </style>
 </head>
 <body>
    <h1>Eric's Movie Recommendations</h1>
@@ -74,11 +65,14 @@
        <ul>
            {% for movie in recommendations %}
                <li>
-                   <div class="movie-info">
-                       <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
+                   <div class="movie-box">
+                       <div class="movie-info">
+                           <span>{{ movie['title'] }}</span>
+                           <span>{{ movie['genre'] }}</span>
+                       </div>
                        <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
+                       <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
                    </div>
-                   <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
                </li>
            {% endfor %}
        </ul>
