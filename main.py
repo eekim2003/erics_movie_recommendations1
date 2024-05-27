@@ -13,7 +13,7 @@ def display_recommendations(recommendations):
     if recommendations:
         print("Here are some movie recommendations based on your search:")
         for movie in recommendations:
-            print(f"- {movie['title']} ({movie['genre']})")
+            print(f"- {movie['title']} ({movie['genre']}) ({movie["Eric's Rating"]})")
     else:
         print("No recommendations found for your query.")
 

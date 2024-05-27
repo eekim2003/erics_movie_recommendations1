@@ -14,27 +14,6 @@
        h1 {
            color: #222222;
        }
-       form {
-           margin-bottom: 20px;
-       }
-       input[type="text"] {
-           padding: 10px;
-           font-size: 16px;
-           width: 100%;
-           max-width: 300px;
-           margin-bottom: 10px;
-       }
-       input[type="submit"] {
-           padding: 10px 20px;
-           font-size: 16px;
-           background-color: #007BFF;
-           color: white;
-           border: none;
-           cursor: pointer;
-       }
-       input[type="submit"]:hover {
-           background-color: #0056b3;
-       }
        ul {
            list-style-type: none;
            padding: 0;
@@ -44,19 +23,27 @@
            margin: 5px 0;
            padding: 10px;
            border: 1px solid #ddd;
+           position: relative;
        }
-       /* Adjusted styles for the "Back to search" link */
+       .rating {
+           position: absolute;
+           top: 0;
+           right: 0;
+           padding: 0 10px;
+           font-style: italic;
+           color: #555;
+       }
        a {
            display: inline-block;
            margin-top: 20px;
-           padding: 10px 20px; /* Added padding to make the button larger */
-           font-size: 16px; /* Applied font size */
-           background-color: #007BFF; /* Blue background color */
-           color: white; /* White text color */
+           padding: 10px 20px;
+           font-size: 16px;
+           background-color: #007BFF;
+           color: white;
            text-decoration: none;
        }
        a:hover {
-           background-color: #0056b3; /* Darker blue on hover */
+           background-color: #0056b3;
        }
    </style>
 </head>
@@ -66,13 +53,12 @@
        <h2>Here are some movie recommendations based on your search:</h2>
        <ul>
            {% for movie in recommendations %}
-               <li>{{ movie['title'] }} ({{ movie['genre'] }})</li>
+               <li>{{ movie['title'] }} ({{ movie['genre'] }})<span class="rating">Eric's Rating: {{ movie['rating'] }}</span></li>
            {% endfor %}
        </ul>
    {% else %}
        <p>No recommendations found for your query.</p>
    {% endif %}
-   <!-- Modified link style for the "Back to search" button -->
    <a href="/">Back to search</a>
 </body>
 </html>
