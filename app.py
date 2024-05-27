@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request
 import json
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static')
 
 def load_movies(file_path):
     with open(file_path, 'r') as file:
