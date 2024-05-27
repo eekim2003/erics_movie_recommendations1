@@ -12,7 +12,7 @@
            padding: 20px;
        }
        h1 {
-           color: #333;
+           color: #222222;
        }
        form {
            margin-bottom: 20px;
@@ -45,14 +45,18 @@
            padding: 10px;
            border: 1px solid #ddd;
        }
+       /* Adjusted styles for the "Back to search" link */
        a {
            display: inline-block;
            margin-top: 20px;
+           padding: 10px 20px; /* Added padding to make the button larger */
+           font-size: 16px; /* Applied font size */
+           background-color: #007BFF; /* Blue background color */
+           color: white; /* White text color */
            text-decoration: none;
-           color: #007BFF;
        }
        a:hover {
-           text-decoration: underline;
+           background-color: #0056b3; /* Darker blue on hover */
        }
    </style>
 </head>
@@ -68,6 +72,7 @@
    {% else %}
        <p>No recommendations found for your query.</p>
    {% endif %}
+   <!-- Modified link style for the "Back to search" button -->
    <a href="/">Back to search</a>
 </body>
 </html>
