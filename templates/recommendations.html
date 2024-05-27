@@ -27,18 +27,21 @@
        h1 {
            color: #333;
        }
-       ul {
-           list-style-type: none;
-           padding: 0;
-       }
-       li {
-           background-color: rgb(226, 226, 226);
-           padding: 5px; /* Adjust padding */
-           border: 1px solid #ddd;
-           display: flex;
-           align-items: center; /* Vertically center items */
-           margin-bottom: 10px; /* Add margin between each movie */
-       }
+        ul {
+        list-style-type: none;
+        padding: 0;
+        overflow-y: auto; /* Add vertical scrollbar if content exceeds container height */
+        max-height: 400px; /* Adjust the max height based on your preference */
+        }
+
+        li {
+            background-color: rgb(226, 226, 226);
+            margin: 5px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            position: relative;
+            word-wrap: break-word; /* Wrap long text to prevent overflow */
+        }
        .movie-info {
            flex: 1; /* Distribute remaining space equally */
            display: flex;
