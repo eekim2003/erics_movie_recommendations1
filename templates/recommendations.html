@@ -14,17 +14,23 @@
       h1 {
           color: #222222;
       }
-      ul {
-          list-style-type: none;
-          padding: 0;
-      }
-      li {
+    ul {
+        list-style-type: none;
+        padding: 0;
+        max-width: 300px; /* Set a maximum width for the list */
+        margin: auto; /* Center the list horizontally */
+    }
+
+       li {
           background-color: rgb(226, 226, 226);
           margin: 5px 0;
           padding: 10px;
           border: 1px solid #ddd;
           position: relative;
-      }
+          max-width: 280px; /* Set a maximum width for each list item */
+          margin: auto; /* Center each list item horizontally */
+        }
+
       .rating {
           position: absolute;
           top: 0;
