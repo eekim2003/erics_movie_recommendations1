@@ -49,17 +49,25 @@
    </style>
 </head>
 <body>
-   <h1>Eric's Movie Recommendations</h1>
-   {% if recommendations %}
-       <h2>Here are some movie recommendations based on your search:</h2>
-       <ul>
-           {% for movie in recommendations %}
-               <li>{{ movie['title'] }} ({{ movie['genre'] }})<span class="rating">Eric's Rating: {{ movie['rating'] }}</span></li>
-           {% endfor %}
-       </ul>
-   {% else %}
-       <p>No recommendations found for your query.</p>
-   {% endif %}
-   <a href="/">Back to search</a>
-</body>
+    <h1>Eric's Movie Recommendations</h1>
+    {% if recommendations %}
+        <h2>Here are some movie recommendations based on your search:</h2>
+        <ul>
+            {% for movie in recommendations %}
+                <li>
+                    <div>
+                        <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster" style="width: 100px; height: auto;">
+                    </div>
+                    <div>
+                        <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
+                        <span class="rating">Eric's Rating: {{ movie['rating'] }}</span>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No recommendations found for your query.</p>
+    {% endif %}
+    <a href="/">Back to search</a>
+ </body>
 </html>
