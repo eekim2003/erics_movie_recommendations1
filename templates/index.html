@@ -1,88 +1,82 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Movie Recommendations</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-image: url('/static/images/movies.jpeg');
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .container {
-            text-align: center;
-            max-width: 400px;
-            width: 100%;
-            padding: 20px;
-            background-color: rgba(255, 255, 255, 0.9);
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-        }
-        h1 {
-            color: #333;
-        }
-        form {
-            margin-bottom: 20px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        input[type="text"] {
-            padding: 10px;
-            font-size: 16px;
-            width: 100%;
-            max-width: 300px;
-            margin-bottom: 10px;
-            box-sizing: border-box;
-        }
-        input[type="submit"] {
-            padding: 10px 20px;
-            font-size: 16px;
-            background-color: #007BFF;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        input[type="submit"]:hover {
-            background-color: #0056b3;
-        }
-        ul {
-            list-style-type: none;
-            padding: 0;
-        }
-        li {
-            background-color: white;
-            margin: 5px 0;
-            padding: 10px;
-            border: 1px solid #ddd;
-        }
-        a {
-            display: inline-block;
-            margin-top: 20px;
-            text-decoration: none;
-            color: #007BFF;
-        }
-        a:hover {
-            text-decoration: underline;
-        }
-    </style>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Movie Recommendations</title>
+   <style>
+       body {
+           font-family: Arial, sans-serif;
+           background-color: #f0f0f0;
+           margin: 0;
+           display: flex;
+           justify-content: center;
+           align-items: center;
+           height: 100vh;
+       }
+       .container {
+           text-align: center;
+           max-width: 400px;
+           width: 100%;
+           padding: 20px;
+           background-color: white;
+           box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+           border-radius: 8px;
+       }
+       h1 {
+           color: #333;
+       }
+       form {
+           margin-bottom: 20px;
+       }
+       input[type="text"] {
+           padding: 10px;
+           font-size: 16px;
+           width: 100%;
+           max-width: 300px;
+           margin-bottom: 10px;
+           box-sizing: border-box;
+       }
+       input[type="submit"] {
+           padding: 10px 20px;
+           font-size: 16px;
+           background-color: #007BFF;
+           color: white;
+           border: none;
+           cursor: pointer;
+       }
+       input[type="submit"]:hover {
+           background-color: #0056b3;
+       }
+       ul {
+           list-style-type: none;
+           padding: 0;
+       }
+       li {
+           background-color: white;
+           margin: 5px 0;
+           padding: 10px;
+           border: 1px solid #ddd;
+       }
+       a {
+           display: inline-block;
+           margin-top: 20px;
+           text-decoration: none;
+           color: #007BFF;
+       }
+       a:hover {
+           text-decoration: underline;
+       }
+   </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Movie Recommendations</h1>
-        <form action="/recommendations" method="post">
-            <label for="query">Enter a letter, word, or movie genre:</label>
-            <input type="text" id="query" name="query">
-            <input type="submit" value="Search">
-        </form>
-    </div>
+   <div class="container">
+       <h1>Movie Recommendations</h1>
+       <form action="/recommendations" method="post">
+           <label for="query">Enter a letter, word, or movie genre:</label><br>
+           <input type="text" id="query" name="query"><br>
+           <input type="submit" value="Search">
+       </form>
+   </div>
 </body>
 </html>
