@@ -1,82 +1,95 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Movie Recommendations</title>
-  <style>
-      body {
-          font-family: Arial, sans-serif;
-          background-color: #1f9b9d;
-          margin: 0;
-          padding: 20px;
-      }
-      h1 {
-          color: #222222;
-      }
-      ul {
-          list-style-type: none;
-          padding: 0;
-      }
-      li {
-          background-color: rgb(226, 226, 226);
-          margin: 5px 0;
-          padding: 10px;
-          border: 1px solid #ddd;
-          position: relative;
-      }
-      .rating {
-          position: absolute;
-          top: 0;
-          right: 0;
-          transform: translateY(50%);
-          padding: 0 10px;
-          font-style: italic;
-          color: #555;
-      }
-      a {
-          display: inline-block;
-          margin-top: 20px;
-          padding: 10px 20px;
-          font-size: 16px;
-          background-color: #007BFF;
-          color: white;
-          text-decoration: none;
-      }
-      a:hover {
-          background-color: #0056b3;
-      }
-      .movie-info {
-          display: flex;
-          align-items: center;
-      }
-      .movie-info span {
-          margin-right: 20px;
-      }
-      .movie-info img {
-          margin-right: 10px;
-          max-width: 100px;
-          height: auto;
-      }
-  </style>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Movie Recommendations</title>
+   <style>
+       body {
+           font-family: Arial, sans-serif;
+           background-color: #1f9b9d;
+           margin: 0;
+           padding: 20px;
+           display: flex;
+           justify-content: center;
+           align-items: center;
+           height: 100vh;
+       }
+       .container {
+           text-align: center;
+           max-width: 600px; /* Adjust maximum width of container */
+           width: 100%;
+           padding: 20px;
+           background-color: rgb(226, 226, 226);
+           box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+           border-radius: 8px;
+       }
+       h1 {
+           color: #333;
+       }
+       ul {
+           list-style-type: none;
+           padding: 0;
+       }
+       li {
+           background-color: rgb(226, 226, 226);
+           margin: 10px 0; /* Increase margin for each movie recommendation */
+           padding: 10px;
+           border: 1px solid #ddd;
+           display: flex;
+           align-items: center; /* Vertically center items */
+       }
+       .movie-info {
+           flex: 1; /* Distribute remaining space equally */
+           display: flex;
+           align-items: center; /* Vertically center items */
+       }
+       .movie-info span {
+           margin-right: 20px;
+       }
+       .movie-info img {
+           max-width: 100px; /* Limit poster width */
+           height: auto; /* Maintain aspect ratio */
+       }
+       .rating {
+           margin-left: auto; /* Push the rating to the right */
+           font-style: italic;
+           color: #555;
+       }
+       a {
+           display: inline-block;
+           margin-top: 20px;
+           padding: 10px 20px;
+           font-size: 16px;
+           background-color: #007BFF;
+           color: white;
+           text-decoration: none;
+       }
+       a:hover {
+           background-color: #0056b3;
+       }
+   </style>
 </head>
 <body>
-   <h1>Eric's Movie Recommendations</h1>
-   {% if recommendations %}
-       <h2>Here are some movie recommendations based on your search:</h2>
-       <ul>
-           {% for movie in recommendations %}
-               <li>
-                   <div class="movie-info">
-                       <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
-                       <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
-                   </div>
-                   <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
-               </li>
-           {% endfor %}
-       </ul>
-   {% else %}
-       <p>No recommendations found for your query.</p>
-   {% endif %}
-   <a href="/">Back to search</a>
+   <div class="container">
+       <h1>Eric's Movie Recommendations</h1>
+       {% if recommendations %}
+           <h2>Here are some movie recommendations based on your search:</h2>
+           <ul>
+               {% for movie in recommendations %}
+                   <li>
+                       <div class="movie-info">
+                           <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
+                           <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
+                       </div>
+                       <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
+                   </li>
+               {% endfor %}
+           </ul>
+       {% else %}
+           <p>No recommendations found for your query.</p>
+       {% endif %}
+       <a href="/">Back to search</a>
+   </div>
 </body>
 </html>
