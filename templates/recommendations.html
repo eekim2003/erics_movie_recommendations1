@@ -33,16 +33,17 @@
        }
        li {
            background-color: rgb(226, 226, 226);
-           margin: 10px 0; /* Increase margin for each movie recommendation */
            padding: 10px;
            border: 1px solid #ddd;
            display: flex;
            align-items: center; /* Vertically center items */
+           margin-bottom: 10px; /* Add margin between each movie */
        }
        .movie-info {
            flex: 1; /* Distribute remaining space equally */
            display: flex;
            align-items: center; /* Vertically center items */
+           margin-right: 20px; /* Add margin between movie info and poster */
        }
        .movie-info span {
            margin-right: 20px;
@@ -52,7 +53,6 @@
            height: auto; /* Maintain aspect ratio */
        }
        .rating {
-           margin-left: auto; /* Push the rating to the right */
            font-style: italic;
            color: #555;
        }
