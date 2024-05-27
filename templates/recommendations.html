@@ -46,6 +46,15 @@
        a:hover {
            background-color: #0056b3;
        }
+       .movie-info {
+           display: flex;
+           align-items: center;
+       }
+       .movie-info img {
+           margin-right: 10px;
+           max-width: 100px;
+           height: auto;
+       }
    </style>
 </head>
 <body>
@@ -55,13 +64,11 @@
         <ul>
             {% for movie in recommendations %}
                 <li>
-                    <div>
-                        <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster" style="width: 100px; height: auto;">
-                    </div>
-                    <div>
+                    <div class="movie-info">
                         <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
-                        <span class="rating">Eric's Rating: {{ movie['rating'] }}</span>
+                        <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
                     </div>
+                    <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
                 </li>
             {% endfor %}
         </ul>
