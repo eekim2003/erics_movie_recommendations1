@@ -27,6 +27,7 @@
         border: 1px solid #ddd;
         position: relative;
         break-inside: avoid; /* This prevents a box from breaking across columns */
+        height: 200px; /* Set a fixed height for the boxes */
     }
 
 
@@ -61,7 +62,8 @@
       .movie-info img {
           margin-right: 10px;
           max-width: 100px;
-          height: auto;
+          max-height: 150px; /* Set a fixed height for the poster images */
+          height: 100%; /* Ensure the image fills the available height */
       }
   </style>
 </head>
