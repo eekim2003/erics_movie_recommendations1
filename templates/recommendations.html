@@ -123,6 +123,8 @@
            {% endfor %}
        </ul>
        <button class="shuffle-button" onclick="shuffleMovies('{{ query }}')">Shuffle</button>
+       <br>
+       <a href="/">Back to search</a>
    {% else %}
        <div class="no-recommendations-container">
             <p class="no-recommendations">Oops there were no results for "{{ query }}". Please try again</p>
