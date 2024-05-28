@@ -17,21 +17,20 @@
       ul {
         list-style-type: none;
         padding: 0;
-        column-count: 2;
-        column-fill: balance;
-        }
-
-    li {
-        background-color: rgb(226, 226, 226);
-        margin: 10px;
-        padding: 10px;
-        border: 1px solid #ddd;
-        position: relative;
-        break-inside: avoid;
-        height: 200px;
-    }
-
-
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+      }
+      li {
+          background-color: rgb(226, 226, 226);
+          margin: 10px;
+          padding: 10px;
+          border: 1px solid #ddd;
+          width: 30%;
+          box-sizing: border-box;
+          position: relative;
+          height: 200px;
+      }
       .rating {
           position: absolute;
           bottom: 10px;
@@ -66,13 +65,26 @@
           max-height: 150px;
           height: 100%;
       }
+      .shuffle-button {
+          display: inline-block;
+          margin-top: 20px;
+          padding: 10px 20px;
+          font-size: 16px;
+          background-color: #28a745;
+          color: white;
+          text-decoration: none;
+          cursor: pointer;
+      }
+      .shuffle-button:hover {
+          background-color: #218838;
+      }
   </style>
 </head>
 <body>
    <h1>Eric's Movie Recommendations</h1>
    {% if recommendations %}
        <h2>Here are some movie recommendations based on your search:</h2>
-       <ul>
+       <ul id="movie-list">
            {% for movie in recommendations %}
                <li>
                    <div class="movie-info">
@@ -83,9 +95,38 @@
                </li>
            {% endfor %}
        </ul>
+       <button class="shuffle-button" onclick="shuffleMovies('{{ query }}')">Shuffle</button>
    {% else %}
        <p>No recommendations found for your query.</p>
    {% endif %}
    <a href="/">Back to search</a>
+
+   <script>
+       function shuffleMovies(query) {
+           fetch('/shuffle', {
+               method: 'POST',
+               headers: {
+                   'Content-Type': 'application/json'
+               },
+               body: JSON.stringify({ query: query })
+           })
+           .then(response => response.json())
+           .then(movies => {
+               const movieList = document.getElementById('movie-list');
+               movieList.innerHTML = '';
+               movies.forEach(movie => {
+                   const li = document.createElement('li');
+                   li.innerHTML = `
+                       <div class="movie-info">
+                           <span>${movie.title} (${movie.genre})</span>
+                           <img src="${movie.poster}" alt="${movie.title} Poster">
+                       </div>
+                       <div class="rating">Eric's Rating: ${movie.rating}</div>
+                   `;
+                   movieList.appendChild(li);
+               });
+           });
+       }
+   </script>
 </body>
 </html>
