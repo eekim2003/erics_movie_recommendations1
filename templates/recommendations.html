@@ -89,6 +89,12 @@
       .shuffle-button:hover {
           background-color: #218838;
       }
+      .no-recommendations {
+          font-size: 24px;
+          font-weight: bold;
+          color: #222;
+          margin-top: 20px;
+      }
   </style>
 </head>
 <body>
@@ -108,7 +114,7 @@
        </ul>
        <button class="shuffle-button" onclick="shuffleMovies('{{ query }}')">Shuffle</button>
    {% else %}
-       <p>No recommendations found for your query.</p>
+       <p class="no-recommendations">No recommendations found for your query.</p>
    {% endif %}
    <a href="/">Back to search</a>
 
