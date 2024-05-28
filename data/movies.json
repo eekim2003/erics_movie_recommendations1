@@ -5,7 +5,7 @@
     {"title": "Star Wars Episode 3: Revenge of the Sith", "genre": "Sci-Fi", "rating": "5/5", "poster": "/static/images/SW3.jpeg"},
     {"title": "Star Wars Episode 4: A New Hope", "genre": "Sci-Fi", "rating": "3.8/5"},
     {"title": "Star Wars Episode 5: Empire Strikes Back", "genre": "Sci-Fi", "rating": "4/5"},
-    {"title": "Star Wars Episode 6: Return of the Jedi", "genre": "Sci-Fi", "rating": "3.9.5/5"},
+    {"title": "Star Wars Episode 6: Return of the Jedi", "genre": "Sci-Fi", "rating": "3.9/5"},
     {"title": "Forrest Gump", "genre": "Drama", "rating": "4.6/5"},
     {"title": "Inception", "genre": "Sci-Fi", "rating": "4.7/5"},
     {"title": "The Matrix", "genre": "Sci-Fi", "rating": "4/5"},
