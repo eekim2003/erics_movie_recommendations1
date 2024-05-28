@@ -14,24 +14,27 @@
       h1 {
           color: #222222;
       }
+      .columns {
+          column-count: 2;
+          column-gap: 20px; /* Add some gap between columns */
+      }
+      .column-item {
+          display: inline-block;
+          width: 100%;
+      }
       ul {
-        list-style-type: none;
-        padding: 0;
-        column-count: 2;
-        column-fill: balance;
-        }
-
-    li {
-        background-color: rgb(226, 226, 226);
-        margin: 10px;
-        padding: 10px;
-        border: 1px solid #ddd;
-        position: relative;
-        break-inside: avoid;
-        height: 200px;
-    }
-
-
+          list-style-type: none;
+          padding: 0;
+      }
+      li {
+          background-color: rgb(226, 226, 226);
+          margin: 10px;
+          padding: 10px;
+          border: 1px solid #ddd;
+          position: relative;
+          break-inside: avoid;
+          height: 200px;
+      }
       .rating {
           position: absolute;
           bottom: 10px;
@@ -66,23 +69,29 @@
           max-height: 150px;
           height: 100%;
       }
+      /* Adjust the second column's position */
+      .column-item:nth-child(odd) {
+          margin-top: 20px; /* Adjust this value as needed */
+      }
   </style>
 </head>
 <body>
    <h1>Eric's Movie Recommendations</h1>
    {% if recommendations %}
        <h2>Here are some movie recommendations based on your search:</h2>
-       <ul>
-           {% for movie in recommendations %}
-               <li>
-                   <div class="movie-info">
-                       <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
-                       <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
-                   </div>
-                   <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
-               </li>
-           {% endfor %}
-       </ul>
+       <div class="columns">
+           <ul>
+               {% for movie in recommendations %}
+                   <li class="column-item">
+                       <div class="movie-info">
+                           <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
+                           <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
+                       </div>
+                       <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
+                   </li>
+               {% endfor %}
+           </ul>
+       </div>
    {% else %}
        <p>No recommendations found for your query.</p>
    {% endif %}
