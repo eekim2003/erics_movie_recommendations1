@@ -14,24 +14,27 @@
       h1 {
           color: #222222;
       }
+      .container {
+          display: flex;
+          justify-content: space-between;
+      }
+      .column {
+          flex: 1;
+          margin: 10px;
+      }
       ul {
-        list-style-type: none;
-        padding: 0;
-        column-count: 2;
-        column-fill: balance;
-        }
-
-    li {
-        background-color: rgb(226, 226, 226);
-        margin: 10px;
-        padding: 10px;
-        border: 1px solid #ddd;
-        position: relative;
-        break-inside: avoid;
-        height: 200px;
-    }
-
-
+          list-style-type: none;
+          padding: 0;
+          margin: 0;
+      }
+      li {
+          background-color: rgb(226, 226, 226);
+          margin: 10px 0;
+          padding: 10px;
+          border: 1px solid #ddd;
+          position: relative;
+          height: 200px;
+      }
       .rating {
           position: absolute;
           bottom: 10px;
@@ -72,20 +75,23 @@
    <h1>Eric's Movie Recommendations</h1>
    {% if recommendations %}
        <h2>Here are some movie recommendations based on your search:</h2>
-       <ul>
-           {% for movie in recommendations %}
-               <li>
-                   <div class="movie-info">
-                       <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
-                       <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
-                   </div>
-                   <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
-               </li>
-           {% endfor %}
-       </ul>
-   {% else %}
-       <p>No recommendations found for your query.</p>
-   {% endif %}
-   <a href="/">Back to search</a>
-</body>
-</html>
+       <div class="container">
+           <div class="column">
+               <ul>
+                   {% for movie in recommendations|slice(0, recommendations|length//2) %}
+                       <li>
+                           <div class="movie-info">
+                               <span>{{ movie['title'] }} ({{ movie['genre'] }})</span>
+                               <img src="{{ movie['poster'] }}" alt="{{ movie['title'] }} Poster">
+                           </div>
+                           <div class="rating">Eric's Rating: {{ movie['rating'] }}</div>
+                       </li>
+                   {% endfor %}
+               </ul>
+           </div>
+           <div class="column">
+               <ul>
+                   {% for movie in recommendations|slice(recommendations|length//2, recommendations|length) %}
+                       <li>
+                           <div class="movie-info">
+        
