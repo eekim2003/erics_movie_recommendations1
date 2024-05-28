@@ -10,7 +10,7 @@ def load_movies(file_path):
     return movies
 
 def get_recommendations(movies, query):
-    recommendations = [movie for movie in movies if query.lower() in movie['title'].lower() or query.lower() in movie['genre'].lower() or query.lower() in movie.get('other', '').lower()]
+    recommendations = [movie for movie in movies if query.lower() in movie['title'].lower() or query.lower() in movie['genre'].lower() or query.lower() in movie.get('other').lower()]
     return recommendations
 
 @app.route('/')
