@@ -92,7 +92,7 @@
 <body>
    <h1>Eric's Movie Recommendations</h1>
    {% if recommendations %}
-       <h2>Here are some movie recommendations based on your search:</h2>
+       <h2>Here are some movie recommendations based on your search: "{{ query }}"</h2>
        <ul id="movie-list">
            {% for movie in recommendations %}
                <li>
