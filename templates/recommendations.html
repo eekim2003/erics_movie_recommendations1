@@ -95,6 +95,11 @@
           color: #222;
           margin-top: 20px;
       }
+      .no-recommendations img {
+          margin-top: 20px;
+          max-width: 100%;
+          height: auto;
+      }
   </style>
 </head>
 <body>
@@ -114,7 +119,8 @@
        </ul>
        <button class="shuffle-button" onclick="shuffleMovies('{{ query }}')">Shuffle</button>
    {% else %}
-       <p class="no-recommendations">No recommendations found for your query.</p>
+       <p class="no-recommendations">Oops there were no results for "{{ query }}". Please try again</p>
+       <img src="/static/images/NOOOO.jpeg" alt="No recommendations image">
    {% endif %}
    <a href="/">Back to search</a>
 
